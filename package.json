@@ -1,0 +1,18 @@
+{
+  "name": "kingshot-lite",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Semi-3D castle defense shooter with coin-collecting hero and buildable gun towers.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.2"
+  }
+}

@@ -1,0 +1,536 @@
+:root {
+  --gold: #f5c518;
+  --gold-light: #ffe27a;
+  --wood: #a9703a;
+  --wood-light: #e0b97e;
+  --ink: #1c1f26;
+  --panel: rgba(20, 24, 32, 0.82);
+  --good: #7dff8a;
+  --bad: #ff6b6b;
+  --font: "Trebuchet MS", "Segoe UI", Verdana, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #4f9c37;
+  font-family: var(--font);
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ------------------------------------------------------------------ *
+ * HUD shell
+ * ------------------------------------------------------------------ */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) 0
+    env(safe-area-inset-left, 0);
+}
+
+.hud-top {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hud-block {
+  background: var(--panel);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  min-width: 168px;
+}
+
+.hud-block.right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.keep-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keep-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
+}
+
+.bar {
+  position: relative;
+  flex: 1;
+  height: 18px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+}
+
+.bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #7ee06a, #3fa83a);
+  transition: width 0.18s ease-out, background 0.3s ease;
+}
+
+.bar-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.wave-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.3px;
+}
+
+.wave-row .dim {
+  color: #b9c2d0;
+  font-weight: normal;
+}
+
+.bar-hero {
+  height: 11px;
+  width: 132px;
+}
+
+.bar-hero .bar-fill {
+  background: linear-gradient(180deg, #6cc4ff, #2b7fd4);
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coin-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 2px solid rgba(245, 197, 24, 0.6);
+  border-radius: 999px;
+  padding: 3px 14px 3px 6px;
+  font-size: 20px;
+  font-weight: bold;
+  color: var(--gold-light);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.coin-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #fff3b0, var(--gold) 55%, #b88700);
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.35), 0 0 10px rgba(245, 197, 24, 0.55);
+}
+
+/* --- Wood: the repair resource --- */
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wood-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel);
+  border: 2px solid rgba(216, 176, 113, 0.65);
+  border-radius: 999px;
+  padding: 3px 13px 3px 6px;
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--wood-light);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.wood-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: linear-gradient(160deg, #e0b97e, #a9703a 60%, #6a4320);
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.4), inset 0 2px 2px rgba(255, 255, 255, 0.25);
+}
+
+/* Pulses once the keep is damaged, hinting that wood now has a use. */
+.wood-chip.urgent {
+  border-color: rgba(157, 255, 138, 0.9);
+  animation: woodUrgent 1.6s ease-in-out infinite;
+}
+
+@keyframes woodUrgent {
+  0%, 100% {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3), 0 0 0 rgba(157, 255, 138, 0);
+  }
+  50% {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3), 0 0 14px rgba(157, 255, 138, 0.55);
+  }
+}
+
+#coin-count.pop {
+  animation: coinPop 0.28s ease-out;
+}
+
+@keyframes coinPop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------------ *
+ * Callouts + floaters
+ * ------------------------------------------------------------------ */
+
+.callout {
+  position: absolute;
+  top: 27%;
+  left: 50%;
+  transform: translate(-50%, 0) scale(0.86);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  pointer-events: none;
+  width: max-content;
+  max-width: 90vw;
+}
+
+.callout.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.callout-title {
+  font-size: clamp(26px, 6vw, 46px);
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  color: #fff;
+  -webkit-text-stroke: 2px rgba(0, 0, 0, 0.7);
+  paint-order: stroke fill;
+  text-shadow: 0 5px 0 rgba(0, 0, 0, 0.32);
+}
+
+.callout-title.good { color: var(--good); }
+.callout-title.warn { color: var(--gold-light); }
+
+.callout-sub {
+  margin-top: 2px;
+  font-size: clamp(12px, 2.6vw, 16px);
+  color: #eaf3ff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.75);
+}
+
+.floaters {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.floater {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: bold;
+  font-size: 17px;
+  white-space: nowrap;
+  will-change: transform, opacity;
+  -webkit-text-stroke: 1.5px rgba(0, 0, 0, 0.65);
+  paint-order: stroke fill;
+  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
+}
+
+.floater.dmg { color: #fff6d6; font-size: 15px; }
+.floater.bad { color: var(--bad); }
+.floater.coin { color: var(--gold-light); }
+.floater.wood { color: var(--wood-light); }
+.floater.heal { color: #9dff8a; }
+.floater.good { color: var(--good); font-size: 15px; letter-spacing: 1px; }
+.floater.kill { color: #ffd8a8; font-size: 13px; letter-spacing: 1.5px; }
+
+/* ------------------------------------------------------------------ *
+ * Build prompt
+ * ------------------------------------------------------------------ */
+
+.prompt {
+  position: absolute;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 2px solid rgba(245, 197, 24, 0.55);
+  border-radius: 16px;
+  padding: 10px 14px;
+  min-width: 210px;
+  text-align: center;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  /* Keep clear of the joystick thumb zone. */
+  margin-left: 0;
+}
+
+.prompt.hidden {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(10px);
+  pointer-events: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.prompt-title {
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+}
+
+.prompt-sub {
+  font-size: 12px;
+  color: #c3cbd8;
+  margin: 2px 0 8px;
+}
+
+.prompt-sub .cost {
+  color: var(--gold-light);
+  font-weight: bold;
+}
+
+.btn {
+  font-family: var(--font);
+  font-weight: bold;
+  letter-spacing: 1px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.08s ease, filter 0.15s ease;
+}
+
+.btn:active {
+  transform: scale(0.95);
+}
+
+.btn-build {
+  width: 100%;
+  padding: 10px 18px;
+  font-size: 15px;
+  color: #2a1c00;
+  background: linear-gradient(180deg, #ffe27a, var(--gold));
+  box-shadow: 0 4px 0 #a87d00, 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.prompt.locked .btn-build {
+  background: linear-gradient(180deg, #8d95a3, #616a78);
+  box-shadow: 0 4px 0 #3d444e;
+  color: #2b3038;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ *
+ * Virtual joystick
+ * ------------------------------------------------------------------ */
+
+.stick-zone {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.stick-base {
+  position: absolute;
+  width: 132px;
+  height: 132px;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+  border: 3px solid rgba(255, 255, 255, 0.32);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.stick-base.visible {
+  opacity: 1;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #c8d3e2 60%, #96a4b8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------------ *
+ * Overlays
+ * ------------------------------------------------------------------ */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, rgba(12, 20, 12, 0.55), rgba(6, 10, 6, 0.86));
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  z-index: 20;
+  transition: opacity 0.25s ease;
+}
+
+/*
+ * `visibility` + an explicit `backdrop-filter: none` are both required here:
+ * a backdrop-filtered element with opacity:0 still blurs what's behind it in
+ * Chromium, which would leave the whole game looking frosted over.
+ */
+.overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.panel {
+  width: min(430px, 88vw);
+  background: linear-gradient(180deg, rgba(34, 42, 36, 0.96), rgba(18, 24, 20, 0.96));
+  border: 3px solid rgba(245, 197, 24, 0.4);
+  border-radius: 22px;
+  padding: 22px 22px 24px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: clamp(28px, 7vw, 42px);
+  letter-spacing: 2px;
+  color: var(--gold);
+  -webkit-text-stroke: 2px rgba(0, 0, 0, 0.55);
+  paint-order: stroke fill;
+}
+
+.title span {
+  color: #fff;
+}
+
+.tagline {
+  margin: 0 0 16px;
+  color: #cfd8e4;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.tagline b {
+  color: var(--gold-light);
+}
+
+.how {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  text-align: left;
+  font-size: 13.5px;
+  color: #d7e0ec;
+  display: grid;
+  gap: 7px;
+}
+
+.how li {
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid rgba(245, 197, 24, 0.6);
+  border-radius: 8px;
+  padding: 7px 10px;
+  line-height: 1.35;
+}
+
+.how b {
+  color: var(--gold-light);
+}
+
+.btn-start {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 17px;
+  color: #2a1c00;
+  background: linear-gradient(180deg, #ffe27a, var(--gold));
+  box-shadow: 0 5px 0 #a87d00, 0 12px 24px rgba(0, 0, 0, 0.35);
+}
+
+.hint {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: #97a3b3;
+}
+
+/* Landscape phones: keep the top bar from eating the view. */
+@media (max-height: 460px) {
+  .hud-block { padding: 6px 10px; }
+  .coin-chip { font-size: 17px; }
+  .callout { top: 20%; }
+}

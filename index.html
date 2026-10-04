@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#4f9c37" />
+    <title>Kingshot Lite — Hold the Keep</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="hud" class="hud">
+        <!-- Top bar -->
+        <div class="hud-top">
+          <div class="hud-block">
+            <div class="keep-row">
+              <span class="keep-icon">🏰</span>
+              <div class="bar bar-keep">
+                <div id="keep-fill" class="bar-fill"></div>
+                <span id="keep-text" class="bar-text">100 / 100</span>
+              </div>
+            </div>
+            <div class="wave-row">
+              <span id="wave-label">Wave 1</span>
+              <span id="wave-enemies" class="dim">0 left</span>
+            </div>
+          </div>
+
+          <div class="hud-block right">
+            <div class="chips">
+              <div class="coin-chip">
+                <span class="coin-dot"></span>
+                <span id="coin-count">0</span>
+              </div>
+              <div id="wood-chip" class="wood-chip">
+                <span class="wood-dot"></span>
+                <span id="wood-count">0</span>
+              </div>
+            </div>
+            <div id="hero-row" class="hero-row">
+              <div class="bar bar-hero">
+                <div id="hero-fill" class="bar-fill"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Wave / combo callout -->
+        <div id="callout" class="callout"></div>
+
+        <!-- Floating damage numbers -->
+        <div id="floaters" class="floaters"></div>
+
+        <!-- Build prompt -->
+        <div id="prompt" class="prompt hidden">
+          <div id="prompt-title" class="prompt-title">Archer Tower</div>
+          <div id="prompt-sub" class="prompt-sub"><span class="cost">40</span> coins to build</div>
+          <button id="prompt-btn" class="btn btn-build">BUILD</button>
+        </div>
+
+        <!-- Mobile joystick zone -->
+        <div id="stick-zone" class="stick-zone">
+          <div id="stick-base" class="stick-base">
+            <div id="stick-knob" class="stick-knob"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Overlays -->
+      <div id="overlay" class="overlay">
+        <div class="panel">
+          <h1 class="title">KINGSHOT <span>LITE</span></h1>
+          <p class="tagline">Defend the keep. Loot the fallen. Build the towers.</p>
+          <ul class="how">
+            <li><b>Move</b> — WASD / arrows, or drag anywhere to steer</li>
+            <li><b>Loose</b> — automatic. Your archer draws and fires at the nearest foe</li>
+            <li><b>Loot</b> — enemies throw coins on death. Walk over them</li>
+            <li><b>Build</b> — stand on a glowing pad and spend coins on an archer tower</li>
+            <li><b>Chop</b> — cut trees for <b>wood</b>, then repair the keep or a battered tower</li>
+          </ul>
+          <button id="start-btn" class="btn btn-start">START DEFENDING</button>
+          <p class="hint">Tip: don't let them reach the keep.</p>
+        </div>
+      </div>
+
+      <div id="gameover" class="overlay hidden">
+        <div class="panel">
+          <h1 id="go-title" class="title">THE KEEP FELL</h1>
+          <p id="go-stats" class="tagline"></p>
+          <button id="again-btn" class="btn btn-start">TRY AGAIN</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
