@@ -40,6 +40,10 @@
                 <span class="wood-dot"></span>
                 <span id="wood-count">0</span>
               </div>
+              <div id="stone-chip" class="stone-chip">
+                <span class="stone-dot"></span>
+                <span id="stone-count">0</span>
+              </div>
             </div>
             <div id="hero-row" class="hero-row">
               <div class="bar bar-hero">
@@ -62,6 +66,38 @@
           <button id="prompt-btn" class="btn btn-build">BUILD</button>
         </div>
 
+        <!-- Build list: docked left; expanded shows details, collapsed shows icons -->
+        <div id="build-menu" class="build-menu">
+          <div id="build-list" class="build-list">
+            <div class="build-list-head">
+              <span>BUILD</span>
+              <button
+                id="build-collapse"
+                class="btn build-collapse"
+                aria-label="Collapse build list"
+              >&#8249;</button>
+            </div>
+            <div id="build-cards" class="build-cards"></div>
+            <div class="build-list-hint">Pick one, walk to a clear spot, then Place.</div>
+            <button id="build-cancel" class="btn build-cancel hidden">
+              &#10005; CANCEL PLACEMENT
+            </button>
+          </div>
+
+          <div id="build-rail" class="build-rail">
+            <button
+              id="build-expand"
+              class="btn build-expand"
+              aria-label="Expand build list"
+            >&#8250;</button>
+            <div id="build-rail-icons" class="build-rail-icons"></div>
+            <button
+              id="build-rail-cancel"
+              class="btn build-rail-btn build-rail-cancel hidden"
+              aria-label="Cancel placement"
+            >&#10005;</button>
+          </div>
+        </div>
         <!-- Mobile joystick zone -->
         <div id="stick-zone" class="stick-zone">
           <div id="stick-base" class="stick-base">
@@ -79,8 +115,9 @@
             <li><b>Move</b> — WASD / arrows, or drag anywhere to steer</li>
             <li><b>Loose</b> — automatic. Your archer draws and fires at the nearest foe</li>
             <li><b>Loot</b> — enemies throw coins on death. Walk over them</li>
-            <li><b>Build</b> — stand on a glowing pad and spend coins on an archer tower</li>
-            <li><b>Chop</b> — cut trees for <b>wood</b>, then repair the keep or a battered tower</li>
+            <li><b>Build</b> — pick a structure from the <b>Build</b> list on the left, then place it anywhere clear</li>
+            <li><b>Mine</b> — quarries cut <b>stone</b>, the masonry every tower and repair needs</li>
+            <li><b>Chop</b> — cut trees for <b>wood</b>; wood + stone mends the keep or a battered building</li>
           </ul>
           <button id="start-btn" class="btn btn-start">START DEFENDING</button>
           <p class="hint">Tip: don't let them reach the keep.</p>

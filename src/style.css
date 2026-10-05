@@ -212,6 +212,32 @@ body {
   box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.4), inset 0 2px 2px rgba(255, 255, 255, 0.25);
 }
 
+/* --- Stone: the quarry resource every tower and repair needs --- */
+
+.stone-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel);
+  border: 2px solid rgba(194, 203, 214, 0.65);
+  border-radius: 999px;
+  padding: 3px 13px 3px 6px;
+  font-size: 18px;
+  font-weight: bold;
+  color: #dbe4ef;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.stone-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(160deg, #e7edf5, #aab2bc 55%, #6b727b);
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.4), inset 0 2px 2px rgba(255, 255, 255, 0.35);
+}
+
 /* Pulses once the keep is damaged, hinting that wood now has a use. */
 .wood-chip.urgent {
   border-color: rgba(157, 255, 138, 0.9);
@@ -227,7 +253,9 @@ body {
   }
 }
 
-#coin-count.pop {
+#coin-count.pop,
+#wood-count.pop,
+#stone-count.pop {
   animation: coinPop 0.28s ease-out;
 }
 
@@ -303,6 +331,7 @@ body {
 .floater.bad { color: var(--bad); }
 .floater.coin { color: var(--gold-light); }
 .floater.wood { color: var(--wood-light); }
+.floater.stone { color: #dbe4ef; }
 .floater.heal { color: #9dff8a; }
 .floater.good { color: var(--good); font-size: 15px; letter-spacing: 1px; }
 .floater.kill { color: #ffd8a8; font-size: 13px; letter-spacing: 1.5px; }
@@ -384,6 +413,240 @@ body {
   box-shadow: 0 4px 0 #3d444e;
   color: #2b3038;
   cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ *
+ * Build list — always available, collapses to a side tab
+ * ------------------------------------------------------------------ */
+
+.build-menu {
+  position: absolute;
+  left: calc(10px + env(safe-area-inset-left, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* Re-enable pointer events inside the otherwise click-through HUD shell. */
+  pointer-events: auto;
+}
+
+.build-list {
+  width: 234px;
+  max-width: 64vw;
+  background: var(--panel);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  padding: 10px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.build-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 2px 4px 8px;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 1.2px;
+  color: #eaf3ff;
+}
+
+/* Small handle that tucks the whole panel away to the screen edge. */
+.build-collapse {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  color: #dbe4ef;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+}
+
+/* Icon-only rail, shown only while the panel is collapsed. */
+.build-rail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 7px;
+  background: var(--panel);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.build-menu.collapsed .build-list {
+  display: none;
+}
+
+.build-menu.collapsed .build-rail {
+  display: flex;
+}
+
+/* The chevron that re-opens the full panel. */
+.build-expand {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: #eaf3ff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+}
+
+.build-rail-icons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One square icon per building — the collapsed quick bar. */
+.build-rail-btn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 21px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.build-rail-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.build-rail-btn.selected {
+  border-color: rgba(125, 255, 138, 0.9);
+  box-shadow: 0 0 0 1px rgba(125, 255, 138, 0.4), 0 0 12px rgba(125, 255, 138, 0.4);
+}
+
+.build-rail-btn.unaffordable {
+  opacity: 0.5;
+}
+
+.build-rail-cancel {
+  font-size: 16px;
+  color: #ffd9d0;
+  background: linear-gradient(180deg, #e8705a, #c0392b);
+  border-color: rgba(255, 180, 160, 0.55);
+}
+
+.build-rail-cancel.hidden {
+  display: none;
+}
+
+/* Explicit touch-friendly way out of placement mode. */
+.build-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 9px;
+  padding: 8px 12px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #fff2ee;
+  background: linear-gradient(180deg, #e8705a, #c0392b);
+  border: 2px solid rgba(255, 180, 160, 0.55);
+  box-shadow: 0 3px 0 #7d241a;
+}
+
+.build-cancel.hidden {
+  display: none;
+}
+
+.build-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.build-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: left;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.build-card:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.build-card.selected {
+  border-color: rgba(125, 255, 138, 0.9);
+  box-shadow: 0 0 0 1px rgba(125, 255, 138, 0.4), 0 0 14px rgba(125, 255, 138, 0.35);
+}
+
+.build-card.unaffordable {
+  opacity: 0.55;
+}
+
+.bc-glyph {
+  width: 26px;
+  font-size: 21px;
+  text-align: center;
+}
+
+.bc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.bc-name {
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.4px;
+}
+
+.bc-blurb {
+  font-size: 10.5px;
+  color: #b9c2d0;
+}
+
+.bc-cost {
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.3px;
+}
+
+.bc-cost .cost {
+  color: var(--gold-light);
+}
+
+.bc-cost .stone {
+  color: #dbe4ef;
+}
+
+.build-list-hint {
+  margin: 8px 4px 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: #b9c2d0;
+}
+
+/* Stone cost highlight inside prompt copy. */
+.prompt-sub .stone {
+  color: #dbe4ef;
+  font-weight: bold;
 }
 
 /* ------------------------------------------------------------------ *

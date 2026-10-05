@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TOWER } from './config.js';
 import { createArcherTower } from './models.js';
+import { buildHealthBar } from './buildingUtils.js';
 import { clamp, damp } from './utils.js';
 
 /**
@@ -20,6 +21,9 @@ export class Tower {
     this.projectiles = projectiles;
     this.sfx = sfx;
     this.level = level;
+    /** Identifies the structure to the shared pad/repair/HUD code. */
+    this.kind = 'tower';
+    this.name = TOWER.name;
 
     const built = createArcherTower(level);
     this.root = built.root;
@@ -171,9 +175,16 @@ export class Tower {
     return this.level < TOWER.maxLevel;
   }
 
+  /** Coin cost to reach the next tier. */
   get upgradeCost() {
     if (!this.canUpgrade) return Infinity;
     return Math.round(TOWER.buildCost * TOWER.upgradeCostScale[this.level]);
+  }
+
+  /** Stone blocks needed to reach the next tier. */
+  get upgradeStoneCost() {
+    if (!this.canUpgrade) return 0;
+    return TOWER.upgradeStone[this.level] ?? 0;
   }
 
   /** Rebuild the visual model for the new tier and refresh the stats. */
@@ -432,29 +443,6 @@ export class Tower {
 }
 
 /** Small two-quad billboard: dark backing + coloured fill. */
-function buildHealthBar() {
-  const group = new THREE.Group();
-
-  const bg = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.3, 0.18),
-    new THREE.MeshBasicMaterial({ color: 0x1c1f26, depthTest: false, transparent: true })
-  );
-  bg.renderOrder = 10;
-  group.add(bg);
-
-  const fill = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.18, 0.11),
-    new THREE.MeshBasicMaterial({ color: 0x8fe07a, depthTest: false, transparent: true })
-  );
-  fill.position.z = 0.01;
-  fill.renderOrder = 11;
-  group.add(fill);
-
-  group.userData.fill = fill;
-  group.visible = false;
-  return group;
-}
-
 function shortestAngle(a, b) {
   let d = ((b - a + Math.PI) % (Math.PI * 2)) + Math.PI * 2;
   d %= Math.PI * 2;

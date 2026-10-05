@@ -17,6 +17,8 @@ export class HUD {
       coinCount: $('coin-count'),
       woodChip: $('wood-chip'),
       woodCount: $('wood-count'),
+      stoneChip: $('stone-chip'),
+      stoneCount: $('stone-count'),
       waveLabel: $('wave-label'),
       waveEnemies: $('wave-enemies'),
       callout: $('callout'),
@@ -26,6 +28,15 @@ export class HUD {
       promptSub: $('prompt-sub'),
       promptCost: $('prompt-cost'),
       promptBtn: $('prompt-btn'),
+      promptCycle: $('prompt-cycle'),
+      buildMenu: $('build-menu'),
+      buildList: $('build-list'),
+      buildCards: $('build-cards'),
+      buildCollapse: $('build-collapse'),
+      buildExpand: $('build-expand'),
+      buildCancel: $('build-cancel'),
+      buildRailIcons: $('build-rail-icons'),
+      buildRailCancel: $('build-rail-cancel'),
       overlay: $('overlay'),
       gameover: $('gameover'),
       goTitle: $('go-title'),
@@ -59,6 +70,129 @@ export class HUD {
 
   onPromptClick(cb) {
     this._promptAction = cb;
+  }
+
+  /**
+   * Render the build list from the building catalogue.
+   *
+   * `onPick(id)` fires when a card is chosen, `onToggle()` when the collapse
+   * handle or the edge tab is used, and `onCancel()` when the placement cancel
+   * button is tapped.
+   */
+  buildBuildMenu(defs, { onPick, onToggle, onCancel } = {}) {
+    this._buildDefs = defs;
+    this._buildPick = onPick;
+    this._buildCards = {};
+    this._buildRailIcons = {};
+
+    if (this.el.buildCards) {
+      this.el.buildCards.innerHTML = '';
+      for (const def of defs) {
+        const card = document.createElement('button');
+        card.className = 'build-card';
+        card.dataset.id = def.id;
+        card.innerHTML =
+          `<span class="bc-glyph">${def.glyph}</span>` +
+          `<span class="bc-text">` +
+          `<span class="bc-name">${def.name}</span>` +
+          `<span class="bc-blurb">${def.blurb}</span>` +
+          `<span class="bc-cost" data-cost></span>` +
+          `</span>`;
+        card.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._buildPick?.(def.id);
+        });
+        this.el.buildCards.appendChild(card);
+        this._buildCards[def.id] = card;
+      }
+    }
+
+    // Collapsed rail: one icon-only button per building.
+    if (this.el.buildRailIcons) {
+      this.el.buildRailIcons.innerHTML = '';
+      for (const def of defs) {
+        const btn = document.createElement('button');
+        btn.className = 'btn build-rail-btn';
+        btn.dataset.id = def.id;
+        btn.textContent = def.glyph;
+        btn.title = def.name;
+        btn.setAttribute('aria-label', def.name);
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._buildPick?.(def.id);
+        });
+        this.el.buildRailIcons.appendChild(btn);
+        this._buildRailIcons[def.id] = btn;
+      }
+    }
+
+    // Collapse via the header handle, expand via the rail chevron.
+    this.el.buildCollapse?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onToggle?.();
+    });
+    this.el.buildExpand?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onToggle?.();
+    });
+
+    this.el.buildCancel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onCancel?.();
+    });
+    this.el.buildRailCancel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onCancel?.();
+    });
+  }
+
+  /** Show the full panel, or collapse it to the icon rail. */
+  setBuildMenuOpen(open) {
+    this.el.buildMenu?.classList.toggle('collapsed', !open);
+  }
+
+  /**
+   * Reveal the cancel buttons while the player is siting a structure — the
+   * touch-friendly way out of placement (both the panel and the rail show one).
+   */
+  setPlacing(active) {
+    this.el.buildCancel?.classList.toggle('hidden', !active);
+    this.el.buildRailCancel?.classList.toggle('hidden', !active);
+  }
+
+  /** Refresh each card's price, affordability and selected highlight. */
+  updateBuildCards({ coins = 0, stone = 0, counts = {}, selected = null } = {}) {
+    if (!this._buildDefs) return;
+
+    // Called every frame; skip the DOM work unless something actually changed.
+    const sig = `${coins}|${stone}|${counts.tower ?? 0}|${counts.quarry ?? 0}|${counts.wall ?? 0}|${selected}`;
+    if (sig === this._buildSig) return;
+    this._buildSig = sig;
+
+    for (const def of this._buildDefs) {
+      const price = def.cost(counts[def.id] ?? 0);
+      const affordable = coins >= price.coins && stone >= price.stone;
+      const isSelected = selected === def.id;
+
+      const card = this._buildCards[def.id];
+      if (card) {
+        const costEl = card.querySelector('[data-cost]');
+        if (costEl) {
+          costEl.innerHTML =
+            `<span class="cost">${price.coins}</span>c` +
+            (price.stone > 0 ? ` + <span class="stone">${price.stone}</span>s` : '');
+        }
+        card.classList.toggle('unaffordable', !affordable);
+        card.classList.toggle('selected', isSelected);
+      }
+
+      // The collapsed rail shows the same state on its icon buttons.
+      const rail = this._buildRailIcons[def.id];
+      if (rail) {
+        rail.classList.toggle('unaffordable', !affordable);
+        rail.classList.toggle('selected', isSelected);
+      }
+    }
   }
 
   showOverlay(show) {
@@ -111,6 +245,18 @@ export class HUD {
       this.el.woodCount.classList.remove('pop');
       void this.el.woodCount.offsetWidth;
       this.el.woodCount.classList.add('pop');
+    }
+  }
+
+  setStone(total) {
+    if (!this.el.stoneCount) return;
+    const next = Math.round(total);
+    this.el.stoneCount.textContent = String(next);
+    if (this._stoneShown !== next) {
+      this._stoneShown = next;
+      this.el.stoneCount.classList.remove('pop');
+      void this.el.stoneCount.offsetWidth;
+      this.el.stoneCount.classList.add('pop');
     }
   }
 
@@ -203,7 +349,7 @@ export class HUD {
       return;
     }
 
-    const signature = `${info.title}|${info.sub}|${info.cost}|${info.enabled}|${info.label}`;
+    const signature = `${info.title}|${info.sub}|${info.enabled}|${info.label}`;
     if (signature === this._promptSignature) return;
     this._promptSignature = signature;
 
@@ -225,6 +371,7 @@ export class HUD {
   reset() {
     this.clearFloaters();
     this.setPrompt(null);
+    this.setBuildMenuOpen(false);
     this.el.callout?.classList.remove('show');
     this.showGameOver(false);
     this.showOverlay(false);

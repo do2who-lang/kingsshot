@@ -133,6 +133,13 @@ export class Sfx {
     this.tone({ freq: base * 1.5, type: 'triangle', dur: 0.07, gain: 0.07, delay: 0.04 });
   }
 
+  /** A quarry yielding stone: a short chisel clink against rock. */
+  stone() {
+    this.tone({ freq: 300, type: 'triangle', dur: 0.09, gain: 0.1, sweep: -90 });
+    this.tone({ freq: 470, type: 'sine', dur: 0.05, gain: 0.05, delay: 0.03 });
+    this.noise({ dur: 0.08, gain: 0.12, filter: 1800, q: 0.7 });
+  }
+
   coinBounce() {
     this.tone({ freq: 1400, type: 'sine', dur: 0.04, gain: 0.05 });
   }

@@ -11,6 +11,10 @@ export class Input {
     this.move = { x: 0, z: 0 };
     this.enabled = false;
     this.onAction = null;
+    /** Toggles the build list open/closed. */
+    this.onBuildMenu = null;
+    /** Cancels placement / closes the build list. */
+    this.onCancel = null;
     /**
      * Fired on any real input event while enabled.
      *
@@ -35,7 +39,7 @@ export class Input {
 
   _isUiTarget(target) {
     return !!target?.closest?.(
-      'button, .panel, .prompt, .overlay, input, a'
+      'button, .panel, .prompt, .overlay, .build-menu, input, a'
     );
   }
 
@@ -50,6 +54,9 @@ export class Input {
       this.onAnyInput?.();
 
       if (k === 'e' || k === ' ' || k === 'enter') this.onAction?.();
+      // B opens the build list; Q / X / Escape cancel placement.
+      if (k === 'b') this.onBuildMenu?.();
+      if (k === 'q' || k === 'x' || k === 'escape') this.onCancel?.();
     });
 
     window.addEventListener('keyup', (e) => {

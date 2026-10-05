@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PALETTE as P } from './config.js';
+import { PALETTE as P, WALL } from './config.js';
 import { add, mat } from './utils.js';
 
 /* ------------------------------------------------------------------ *
@@ -711,6 +711,241 @@ export function createArcherTower(level = 1) {
       turretHeight: turretRoot.position.y,
       /** Where to float the health bar: clear of the roof. */
       badgeHeight: apexY + 0.5,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Stone quarry — a working open-cast pit
+ *
+ * Where the archer tower is masonry, the quarry is *industry*: a terraced
+ * gravel pit shored with timber, stacked with cut blocks, worked by a small
+ * timber derrick and a minecart on rails. It mounts no weapon — it is the
+ * player's source of stone.
+ *
+ * Tiers deepen the pit and raise a taller derrick; the extra stone also buys
+ * visibly more cut blocks on the staging ground.
+ * ------------------------------------------------------------------ */
+
+export function createQuarry(level = 1) {
+  const root = new THREE.Group();
+  const tier = level - 1;
+
+  // --- Terraced pit ------------------------------------------------------
+  // Three concentric steps, each lower than the last. From the tilted camera
+  // the raised outer rim and sunken floor read unmistakably as a dug pit.
+  const outer = cyl(2.0, 2.2, 0.36, P.gravelDark, 14);
+  outer.position.y = 0.18;
+  add(root, outer, { receive: true });
+
+  const mid = cyl(1.46, 1.7, 0.3, P.gravel, 14);
+  mid.position.y = 0.16;
+  add(root, mid, { receive: true });
+
+  const floor = cyl(0.98, 1.18, 0.2, P.quarryRockDark, 14);
+  floor.position.y = 0.11;
+  add(root, floor, { receive: true });
+
+  // --- Timber shoring around the rim ------------------------------------
+  const posts = 7;
+  for (let i = 0; i < posts; i++) {
+    const a = (i / posts) * Math.PI * 2 + 0.35;
+    const post = box(0.13, 0.52, 0.13, P.woodDark);
+    post.position.set(Math.cos(a) * 1.86, 0.42, Math.sin(a) * 1.86);
+    post.rotation.y = -a;
+    add(root, post);
+  }
+
+  // --- Cut stone staged around the pit ----------------------------------
+  // The pale cut faces are what actually read as "stone" from a distance, so
+  // each tier stocks a few more.
+  const blocks = [
+    [0.72, 0.24, -1.5, 0.0],
+    [1.18, 0.24, -1.2, 0.5],
+    [-1.5, 0.24, 0.5, -0.3],
+    [-1.25, 0.24, 1.15, 0.9],
+    [0.16, 0.72, -1.66, 0.2],
+  ];
+  const extra = 2 + tier * 2;
+  for (let i = 0; i < extra; i++) {
+    const a = 0.6 + i * 0.9;
+    blocks.push([Math.cos(a) * 1.55, 0.24, Math.sin(a) * 1.55, i * 0.7]);
+  }
+
+  for (const [x, y, z, rot] of blocks) {
+    const block = box(0.42, 0.3, 0.42, i2even(rot) ? P.quarryRock : P.quarryRockLight);
+    block.position.set(x, y, z);
+    block.rotation.y = rot;
+    add(root, block, { receive: true });
+  }
+
+  // --- Gravel piles ------------------------------------------------------
+  for (const [x, z, r] of [
+    [-0.72, 0.9, 0.36],
+    [0.5, 1.35, 0.3],
+    [-1.0, -0.85, 0.32],
+  ]) {
+    const pile = cone(r, r * 1.4, P.gravel, 6);
+    pile.position.set(x, 0.2 + r * 0.7, z);
+    add(root, pile, { receive: true });
+  }
+
+  // --- Minecart + rails across the floor --------------------------------
+  const railGroup = new THREE.Group();
+  for (const z of [-0.22, 0.22]) {
+    const rail = box(2.0, 0.06, 0.08, P.woodDark);
+    rail.position.set(0.1, 0.24, z);
+    add(railGroup, rail, { cast: false });
+  }
+  root.add(railGroup);
+
+  const cart = new THREE.Group();
+  cart.position.set(0.5, 0.24, 0);
+  const cartBody = box(0.58, 0.36, 0.48, P.woodLight);
+  cartBody.position.y = 0.28;
+  add(cart, cartBody);
+  const cartLoad = box(0.46, 0.2, 0.36, P.quarryRock);
+  cartLoad.position.y = 0.52;
+  add(cart, cartLoad);
+  for (const [wx, wz] of [
+    [-0.2, -0.22],
+    [0.2, -0.22],
+    [-0.2, 0.22],
+    [0.2, 0.22],
+  ]) {
+    const wheel = cyl(0.09, 0.09, 0.07, P.woodDark, 8);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(wx, 0.09, wz);
+    add(cart, wheel, { cast: false });
+  }
+  root.add(cart);
+
+  // --- Timber derrick ----------------------------------------------------
+  const derrick = new THREE.Group();
+  const derrickH = 1.5 + tier * 0.24;
+  derrick.position.set(-0.95, 0.3, -0.7);
+
+  for (const a of [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]) {
+    const legH = derrickH + 0.34;
+    const leg = cyl(0.055, 0.075, legH, P.wood, 5);
+    leg.position.set(Math.cos(a) * 0.3, legH / 2 - 0.05, Math.sin(a) * 0.3);
+    leg.rotation.z = -Math.cos(a) * 0.17;
+    leg.rotation.x = Math.sin(a) * 0.17;
+    add(derrick, leg);
+  }
+
+  const jib = box(1.15, 0.09, 0.09, P.wood);
+  jib.position.set(0.35, derrickH - 0.05, 0);
+  add(derrick, jib);
+
+  const rope = box(0.035, 0.55, 0.035, 0x4a3a26);
+  rope.position.set(0.72, derrickH - 0.38, 0);
+  add(derrick, rope, { cast: false });
+
+  const hoisted = box(0.34, 0.28, 0.34, P.quarryRockLight);
+  hoisted.position.set(0.72, derrickH - 0.78, 0);
+  add(derrick, hoisted);
+  root.add(derrick);
+
+  return {
+    root,
+    parts: {
+      /** Clear of the derrick, for the floating health bar. */
+      badgeHeight: derrickH + 1.0,
+    },
+  };
+}
+
+/** Cheap parity test used to alternate cut-block shades without a counter. */
+function i2even(n) {
+  return Math.floor(n * 10) % 2 === 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Stone wall — one connectable rampart piece
+ *
+ * Walls are built on a grid, one piece per cell, and each piece shapes itself
+ * from its neighbours: a lone block, a straight run, an L corner or a T. The
+ * centre pillar is what makes corners and junctions read as solid masonry; the
+ * panels run from that pillar out to whichever neighbours exist, so two pieces
+ * laid side by side meet seamlessly at the cell boundary.
+ * ------------------------------------------------------------------ */
+
+export function createWall(mask = {}) {
+  const root = new THREE.Group();
+
+  const HALF = WALL.cell / 2;
+  const T = WALL.thickness;
+  const H = WALL.height;
+
+  const n = !!mask.n;
+  const e = !!mask.e;
+  const s = !!mask.s;
+  const w = !!mask.w;
+  const lone = !n && !e && !s && !w;
+
+  /**
+   * A wall run from the cell centre out to one edge, laid along `axis`.
+   * `axis` is 'x' (east/west), 'z' (north/south); `dir` is +1 or -1.
+   */
+  const panel = (axis, dir) => {
+    const along = axis === 'x';
+    const len = HALF;
+    const mid = (dir * len) / 2;
+
+    const base = along
+      ? box(len, 0.26, T + 0.22, P.wallStoneDark)
+      : box(T + 0.22, 0.26, len, P.wallStoneDark);
+    base.position.set(along ? mid : 0, 0.13, along ? 0 : mid);
+    add(root, base, { receive: true });
+
+    const body = along ? box(len, H, T, P.wallStone) : box(T, H, len, P.wallStone);
+    body.position.set(along ? mid : 0, H / 2, along ? 0 : mid);
+    add(root, body, { receive: true });
+
+    // Pale cap course along the top edge.
+    const cap = along
+      ? box(len, 0.12, T + 0.12, P.wallStoneLight)
+      : box(T + 0.12, 0.12, len, P.wallStoneLight);
+    cap.position.set(along ? mid : 0, H + 0.06, along ? 0 : mid);
+    add(root, cap);
+
+    // Battlements: evenly spaced merlons with crenel gaps between them.
+    const count = Math.max(1, Math.floor(len / 0.72));
+    for (let i = 0; i < count; i++) {
+      const d = ((i + 0.5) / count) * len * dir;
+      const shade = i % 2 ? P.wallStoneLight : P.wallStone;
+      const merlon = along ? box(0.36, 0.34, T + 0.06, shade) : box(T + 0.06, 0.34, 0.36, shade);
+      merlon.position.set(along ? d : 0, H + 0.28, along ? 0 : d);
+      add(root, merlon);
+    }
+  };
+
+  if (lone) {
+    // A single piece should read as a short wall run, not a lone post.
+    panel('x', 1);
+    panel('x', -1);
+  } else {
+    if (e) panel('x', 1);
+    if (w) panel('x', -1);
+    if (s) panel('z', 1);
+    if (n) panel('z', -1);
+  }
+
+  // Centre pillar ties every branch together and gives corners their mass.
+  const pillar = box(0.66, H + 0.36, 0.66, P.wallStoneDark);
+  pillar.position.y = (H + 0.36) / 2;
+  add(root, pillar, { receive: true });
+
+  const pillarCap = box(0.78, 0.14, 0.78, P.wallStoneLight);
+  pillarCap.position.y = H + 0.42;
+  add(root, pillarCap);
+
+  return {
+    root,
+    parts: {
+      /** Clear of the battlements, for the floating health bar. */
+      badgeHeight: H + 1.1,
     },
   };
 }

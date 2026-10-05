@@ -6,12 +6,14 @@ except this one actually plays like the ad.
 
 You are a lone archer with a keep to protect. Enemies march in from four gates,
 you loose arrows at them, they **throw coins** on death, you run over the coins to
-bank them, and you spend those coins on **archer towers** so you can hold the line
-without doing everything yourself.
+bank them, and you spend those coins on **structures you raise anywhere on the
+map** — archer towers to hold the line, and stone quarries to cut the masonry
+they are built from.
 
-The keep and your towers both take damage and both are mended with **wood**
-chopped from the trees around the map. Leaving the keep to forage is exactly when
-it's most exposed — that tension is the point.
+Nothing is bolted to a fixed plot. Open the build list, pick a structure, and site
+it wherever the ground is clear. **Coins** pay for the work, **stone** (cut at a
+quarry) is the masonry, and **wood** (chopped from the trees) patches damage —
+leaving your buildings to forage is exactly when they're most exposed.
 
 **There are no guns in this world.** The hero draws a longbow, the towers are
 stone and loose arrows from their windows, and every sound is a bowstring, a
@@ -37,10 +39,16 @@ npm run preview  # serve the built bundle
 | --- | --- |
 | Move | `WASD` / arrow keys, **or** drag anywhere on the screen (virtual joystick) |
 | Loose | Automatic — the archer draws and fires at the best target in range |
-| Interact | Walk up to something, then press `E` / `Space`, or tap the context button |
+| Build | The build list is docked on the left, collapsed to an icon rail by default — tap an icon (or `›`) to build |
+| Interact | Press `E` / `Space`, or tap the context button — places, upgrades, chops or repairs |
+| Tuck away | `B`, or the `‹` handle on the panel, collapses it to an icon-only rail |
+| Cancel | `Q` / `X` / `Esc`, or tap **CANCEL PLACEMENT** while placing |
 
-One button covers every verb — **build** a tower, **upgrade** it, **chop** a
-tree, **repair** the keep, or **repair** a battered tower. The game picks whichever
+The build list is data-driven (see `buildings.js`), and placement is free: a
+translucent **ghost** follows the hero, tinted green where the ground is clear and
+red where it isn't. The single action button then covers every verb — **place**
+the structure you're siting, **upgrade** one you're standing beside, **chop** a
+tree, or **repair** the keep or a battered building. The game picks whichever
 matters most, and the button always says what it will do.
 
 The archer has a cone-weighted auto-aim: enemies in front are preferred over ones
@@ -55,9 +63,11 @@ archer looses arrows  →  they throw coins (physics arcs + bounce)
         ↓
 hero walks over coins  →  purse grows
         ↓
-stand on a build pad  →  spend coins on an archer tower (or upgrade one)
+open the build list  →  pick a tower or quarry  →  place it anywhere clear
         ↓
-keep or tower taking damage?  →  chop trees for wood  →  repair them
+quarry cuts stone  →  towers cost coins + stone; repairs cost wood + stone
+        ↓
+keep or building taking damage?  →  chop trees for wood  →  repair them
         ↓
 wave cleared → bonus coins + a little keep repair → next wave
 ```
@@ -95,8 +105,9 @@ resistant so bullets (sorry, arrows) feel like they land.
 
 ## Archer towers
 
-Four build pads ring the keep at a fixed radius. Each raises a **square stone
-tower**, modelled after the reference art: a stocky two-stage body of weathered
+An archer tower can be raised anywhere on the map (see *Build list & placement*
+below). It is a **square stone tower**, modelled after the reference art: a stocky
+two-stage body of weathered
 stone banded with protruding courses, a big **arched window on every face** of
 the upper stage, **three narrow arched slits** through the lower stage, an arched
 **wooden door** at the foot, **moss** creeping up the shaded stonework, tumbled
@@ -111,7 +122,21 @@ rig: the yaw and pitch groups and the muzzle anchor are pure transforms with no
 meshes attached, so the firing code never has to know there's nothing up there.
 
 Upgrading makes the tower visibly taller, so the investment reads at a glance.
-Prices escalate as you build (`40 → 60 → 80 → 100`), so you can't buy four at once.
+Prices escalate as you build (`40 → 60 → 80 → 100` coins, plus `6 → 8 → 10` stone),
+so you can't buy a whole row at once.
+
+### Build list & placement
+
+Structures are **not** tied to fixed pads. The build list is docked to the left edge
+and starts **collapsed as an icon rail** — one square icon per building. Tap an
+icon to start siting it, or the `›` chevron to expand the full detail cards
+(icon + name + blurb + price). Picking a structure enters placement mode, where a
+translucent ghost is sited at the hero's feet. Walk to a clear spot — the ghost
+glows **green** when the site is legal and **red** when it isn't — then press the
+action button to place. Placement is rejected inside the keep plaza, on the map
+edge, and wherever it would overlap another structure, a standing tree, or
+scenery. The `‹` handle (or `B`) collapses the detail back to the icon rail, and
+**CANCEL PLACEMENT** (or `Q` / `X` / `Esc`) backs out of siting.
 
 Each tower has three tiers you can buy in place:
 
@@ -126,39 +151,90 @@ Towers lead their targets and only loose once roughly on-target.
 ### Towers take damage
 
 A tower is a living structure. Enemies besiege it, it flashes and shows a health
-bar as it drops, and at **zero health it topples over**, fades into rubble, and
-frees its pad.
+bar as it drops, and at **zero health it topples over** and fades from the field.
 
 Enemies chip towers at `TOWER.damageTakenScale` (**0.6×**) — they're hacking at
 timber, and without that reduction a pair of grunts would level a tower before the
 hero could cross the map to defend it.
 
-### Rebuilding
+### Losing a building
 
-Rubble is not a total loss. The pad reopens showing the wreckage at a **50%
-discount** (`REPAIR.rebuildDiscount`) — holding the line is rewarded, losing a
-tower isn't a catastrophe.
+A collapsed structure is removed rather than left as a wreck, and there is no
+discounted plot to reclaim. Since placement is free, the answer is to raise a
+replacement somewhere clear — but that costs the coins and stone you'd rather
+have spent elsewhere, which is the real penalty.
+
+## Stone & quarries
+
+**Coin builds, stone is the masonry, wood mends.** Each resource answers a
+different problem.
+
+A **Stone Quarry** is the only source of stone. It costs coins only — stone can't
+buy the mine it comes from — so a run can never lock itself out of its own
+resource. Once raised it drip-feeds stone every few seconds, and each tier both
+deepens the pit and speeds the trickle:
+
+| Tier | Stone per yield | Interval | Health |
+| --- | --- | --- | --- |
+| 1 | 2 | 6.5 s | 130 |
+| 2 | 3 | 5.0 s | 190 |
+| 3 | 5 | 4.0 s | 260 |
+
+Stone is spent on **raising and upgrading towers**; every **repair** costs a
+little stone as well, so a run with no quarry quickly runs out of the means to
+build *or* mend. Quarries are structures like any other: enemies besiege them, and
+the hero patches them with wood + stone.
+
+## Stone walls
+
+The **Stone Wall** is the only structure that *connects*. Pieces snap to a shared
+3.4-metre grid, and each rebuilds its own shape from whichever neighbours exist —
+laying one piece beside another produces straights, corners, T-junctions and ends
+automatically, with a solid pillar at every junction. The ghost reshapes as you
+walk, so you can see the corner forming before you commit.
+
+A piece that stands **alone** turns to face the keep, presenting its face to the
+castle; the moment it joins a run it squares up to the grid so neighbouring
+panels meet cleanly. So a scattered ring of blocks all face inward, and a
+connected rampart stays true.
+
+Walls are the cheap way to actually *protect* the keep: an enemy that runs into a
+rampart besieges it instead of strolling on to the keep, so a continuous line buys
+the hero time and the towers clean shots. They block the hero too, so leave a gap
+to sally out through. Every piece has its own health — a breach opens exactly
+where the stone gave way — and walls do **not** upgrade.
+
+| Knob | Default | Effect |
+| --- | --- | --- |
+| `WALL.buildCost` / `stoneCost` | 12 / 3 | Flat price per piece |
+| `WALL.cell` | 3.4 | Grid pitch pieces snap to |
+| `WALL.maxHealth` | 160 | Health per piece |
+| `WALL.damageTakenScale` | 0.7 | Enemies chip fieldstone slower than towers |
+| `WALL.keepClearance` | 5.0 | How close a wall may ring the keep |
 
 ## Wood & repairs
 
-**Coins build things; wood mends them.** Keeping that split means you always know
-which resource answers which problem.
+Wood is the patch and stone is the filler. Keeping the split (coins build, wood +
+stone mend) means you always know which resource answers which problem.
 
 Trees are the only renewable source of wood. Each one takes **3 chops** to fell
 (a segmented bar above the trunk shows progress), yields **1 wood per chop**, and
 then topples, leaves a stump, and **regrows after 30 seconds** — so the map never
 runs out and a long run can't soft-lock.
 
-Wood repairs three things, all through the same verb:
+Repairs cost wood **+ stone**, all through the same verb:
 
 | Target | Effect |
 | --- | --- |
-| Keep | 1 wood → **+12** keep health |
-| Archer tower | 1 wood → **+45** tower health |
+| Keep | 1 wood + 2 stone → **+12** keep health |
+| Archer tower | 1 wood + 2 stone → **+45** tower health |
+| Stone quarry | 1 wood + 2 stone → **+45** quarry health |
+| Stone wall | 1 wood + 2 stone → **+45** wall health |
 
 Standing next to a damaged structure offers the repair. Because a repair is an
-*emergency* and an upgrade is a *luxury*, repairs outrank upgrades even when both
-apply to the same pad (see the priority table in `Game.PRIORITY`).
+*emergency* and an upgrade is a *luxury*, a damaged building always offers repair
+first; an upgrade is only offered while it stands at full health (see the
+priority table in `Game.PRIORITY`).
 
 The wood chip in the HUD pulses green once the keep is hurt, and repairs flash the
 structure green so the feedback reads instantly.
@@ -171,10 +247,12 @@ All of it is tuned in `config.js` under `TREE` and `REPAIR`:
 | `TREE.woodPerChop` | 1 | Wood per swing |
 | `TREE.respawnTime` | 30 s | Regrowth delay |
 | `REPAIR.woodCost` | 1 | Wood per repair action |
+| `REPAIR.stoneCost` | 2 | Stone per repair action |
 | `REPAIR.healAmount` | 12 | Keep health restored |
-| `REPAIR.towerHealAmount` | 45 | Tower health restored |
-| `REPAIR.towerRange` | 3.6 | How close you must stand to a tower |
-| `REPAIR.rebuildDiscount` | 0.5 | Price of rebuilding rubble |
+| `REPAIR.towerHealAmount` | 45 | Structure health restored |
+| `TOWER.stoneCost` / `stoneStep` | 6 / 2 | Stone to raise a tower (escalating) |
+| `QUARRY.levels` | — | Stone per yield + interval per tier |
+| `BUILD.keepClearance` / `spacing` / `edgeMargin` | 7.8 / 1.3 / 5.0 | Placement constraints |
 
 ## Project layout
 
@@ -186,11 +264,14 @@ src/
     config.js             ← ALL balance numbers live here
     Game.js               orchestrator: scene, loop, systems, waves, win/lose
     World.js              terrain, lanes, cliffs, spawn gates, scenery colliders
-    models.js             low-poly builders (rigs with bows, keep, stone tower, props)
+    models.js             low-poly builders (rigs with bows, keep, tower, quarry, props)
+    buildings.js          buildable catalogue: name, cost, model + live factory
     Player.js             archer: movement, auto-aim, bow draw, health/regen
     Enemy.js              the three archetypes + targeting, attacks, health bars
     Tower.js              stone tower: aiming, firing, health, collapse, repair
-    BuildPad.js           dashed build sites, cost badges, rubble, interaction state
+    Quarry.js             stone quarry: passive stone yield, health, collapse, repair
+    Wall.js               grid-snapped wall piece: neighbour mask, health, collapse
+    buildingUtils.js      shared structure health-bar helpers
     Tree.js               choppable trees: chop, topple, stump, regrow
     Keep.js               castle health, damage flash, passive income, collapse
     Coin.js               thrown-coin physics + magnet pickup

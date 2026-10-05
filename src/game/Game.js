@@ -1,21 +1,25 @@
 import * as THREE from 'three';
 import {
+  BUILD,
   CAMERA,
   HERO,
   KEEP,
   PALETTE as P,
+  QUARRY,
   RENDER,
   REPAIR,
+  STONE,
   TOWER,
   TREE,
+  WALL,
   WORLD,
 } from './config.js';
 import { createWorld } from './World.js';
 import { Keep } from './Keep.js';
 import { Player } from './Player.js';
 import { Enemy } from './Enemy.js';
-import { Tower } from './Tower.js';
-import { BuildPad } from './BuildPad.js';
+import { BUILDING_TYPES, buildDef } from './buildings.js';
+import { wallYaw } from './Wall.js';
 import { CoinManager } from './Coin.js';
 import { ProjectileSystem } from './Projectile.js';
 import { Effects } from './Effects.js';
@@ -24,11 +28,8 @@ import { Input } from './Input.js';
 import { HUD } from './HUD.js';
 import { Sfx } from './Sfx.js';
 import { clamp, damp } from './utils.js';
-
 /** The hero cannot walk inside this radius — that's the keep's plaza wall. */
 const KEEP_BLOCK_RADIUS = 5.3;
-const PAD_RADIUS = 11.5;
-const PAD_ANGLES = [Math.PI / 4, (Math.PI * 3) / 4, (Math.PI * 5) / 4, (Math.PI * 7) / 4];
 
 export class Game {
   constructor(canvas) {
@@ -37,9 +38,10 @@ export class Game {
     this.sfx = new Sfx();
 
     this.state = 'menu'; // menu | playing | over
-    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, towers: 0, repairs: 0 };
+    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, quarries: 0, walls: 0, repairs: 0 };
     this.purse = 0;
     this.wood = 0;
+    this.stone = STONE.starting;
 
     this._initRenderer();
     this._initScene();
@@ -54,6 +56,9 @@ export class Game {
       stickKnob: document.getElementById('stick-knob'),
     });
     this.input.onAction = () => this.interact();
+    // B opens the build list; cancel leaves placement or closes the list.
+    this.input.onBuildMenu = () => this.toggleBuildMenu();
+    this.input.onCancel = () => this.cancelOrClose();
     // Skipping the opening take listens for a *fresh* input event; see Input.
     this.input.onAnyInput = () => { this._introSkipRequested = true; };
 
@@ -130,16 +135,10 @@ export class Game {
   }
 
   _buildLevel() {
-    // Pad positions are reserved so scenery never spawns on top of them.
-    this.padPositions = PAD_ANGLES.map(
-      (a) => new THREE.Vector3(Math.sin(a) * PAD_RADIUS, 0, Math.cos(a) * PAD_RADIUS)
-    );
-
+    // The keep plaza is the only reserved ground now: structures are placed
+    // freely by the player, so scenery simply has to avoid the plaza.
     this.world = createWorld(this.scene, {
-      reserved: [
-        ...this.padPositions.map((p) => ({ x: p.x, z: p.z, r: 2.6 })),
-        { x: 0, z: 0, r: 8 },
-      ],
+      reserved: [{ x: 0, z: 0, r: 8 }],
     });
 
     this.keep = new Keep(this.scene, { sfx: this.sfx, effects: null });
@@ -159,10 +158,19 @@ export class Game {
     });
     this.coins.attachHero(this.player);
 
-    this.pads = this.padPositions.map(
-      (pos, i) => new BuildPad(this.scene, pos, { index: i, cost: TOWER.buildCost })
-    );
+    // Structures must exist before anything reads the build menu: pricing
+    // depends on how many already stand.
     this.towers = [];
+    this.quarries = [];
+    /** Wall pieces, keyed by "i,j" grid cell so neighbours are O(1) lookups. */
+    this.walls = new Map();
+    /** Placement mode: { def } while the player is siting a structure. */
+    this.placing = null;
+    /** Translucent preview model shown during placement. */
+    this.ghost = null;
+    this._ghostMaterials = [];
+    /** Whether the build panel is expanded. Collapsed by default (icon rail). */
+    this.buildOpen = false;
     this._coinStreak = 0;
     this._coinStreakTimer = 0;
 
@@ -199,13 +207,22 @@ export class Game {
       },
     });
 
-    this._refreshPadCosts();
+    this._refreshBuildMenu();
   }
 
   _bindUi() {
     this.hud.onStart(() => this.start());
     this.hud.onRestart(() => this.restart());
     this.hud.onPromptClick(() => this.interact());
+    // The build list is data-driven from the building catalogue.
+    this.hud.buildBuildMenu(BUILDING_TYPES, {
+      onPick: (id) => this.pickBuilding(id),
+      onToggle: () => this.toggleBuildMenu(),
+      onCancel: () => this.cancelPlacement(),
+    });
+    // The panel starts collapsed to its icon rail; the player expands it as needed.
+    this.hud.setBuildMenuOpen(this.buildOpen);
+    this.hud.setPlacing(false);
   }
 
   /* ------------------------------------------------------------------ *
@@ -218,12 +235,18 @@ export class Game {
     this.hud.showOverlay(false);
     this.state = 'playing';
     this.input.enabled = true;
+    this.cancelPlacement();
+    this.buildOpen = false;
+    this.hud.setBuildMenuOpen(false);
     this.purse = 0;
     this.wood = 0;
+    this.stone = STONE.starting;
     this.player.reset();
     this.waves.start(10);
     this.hud.setCoins(0);
     this.hud.setWood(0);
+    this.hud.setStone(this.stone);
+    this._refreshBuildMenu();
     this._lastTime = performance.now();
     this._beginIntro();
     this.hud.callout('DEFEND THE KEEP', 'Wave 1 incoming', 2.2);
@@ -241,12 +264,16 @@ export class Game {
     for (const t of this.towers) t.dispose();
     this.towers.length = 0;
 
-    for (const pad of this.pads) {
-      this.scene.remove(pad.root);
-    }
-    this.pads = this.padPositions.map(
-      (pos, i) => new BuildPad(this.scene, pos, { index: i, cost: TOWER.buildCost })
-    );
+    for (const q of this.quarries) q.dispose();
+    this.quarries = [];
+
+    for (const w of this.walls.values()) w.dispose();
+    this.walls.clear();
+
+    // Drop any half-placed structure and start from the collapsed icon rail.
+    this.cancelPlacement();
+    this.buildOpen = false;
+    this.hud.setBuildMenuOpen(false);
 
     this.projectiles.clear();
     this.coins.clear();
@@ -269,17 +296,19 @@ export class Game {
     this.waves.stop();
     this.purse = 0;
     this.wood = 0;
+    this.stone = STONE.starting;
     // Drop the camera state so the follow pose snaps to the hero's spawn rather
     // than easing in from wherever the last run ended.
     this.camTarget = null;
     this.intro = null;
-    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, towers: 0, repairs: 0 };
+    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, quarries: 0, walls: 0, repairs: 0 };
     this.hud.reset();
     this.hud.setCoins(0);
     this.hud.setWood(0);
+    this.hud.setStone(this.stone);
     this.hud.setHero(1);
     this.hud.setKeep(1, this.keep.maxHealth, this.keep.maxHealth);
-    this._refreshPadCosts();
+    this._refreshBuildMenu();
   }
 
   resize() {
@@ -342,12 +371,50 @@ export class Game {
     if (worldPos) this.hud.floater(worldPos, `+${amount} WOOD`, 'wood');
   }
 
-  /** Spreads the ever-increasing tower price across the unbuilt pads. */
-  _refreshPadCosts() {
-    const cost = TOWER.buildCost + this.towers.length * TOWER.costStep;
-    for (const pad of this.pads) {
-      if (!pad.isBuilt) pad.setCost(cost);
-    }
+  _addStone(amount, worldPos) {
+    if (amount <= 0) return;
+    this.stone += amount;
+    this.stats.stone += amount;
+    this.hud.setStone(this.stone);
+    if (worldPos) this.hud.floater(worldPos, `+${amount} STONE`, 'stone');
+  }
+
+  /** How many of each structure already stand, keyed by building id. */
+  _counts() {
+    return {
+      tower: this.towers.length,
+      quarry: this.quarries.length,
+      wall: this.walls.size,
+    };
+  }
+
+  /**
+   * Price of the next structure, given how many of that kind already stand.
+   * Coins and stone both escalate, so you can't raise a whole row at once.
+   */
+  _priceFor(kind) {
+    const def = buildDef(kind);
+    if (!def) return { coins: 0, stone: 0 };
+    return def.cost(this._counts()[kind] ?? 0);
+  }
+
+  /** Push current prices, affordability and selection into the build list. */
+  _refreshBuildMenu() {
+    this.hud.updateBuildCards({
+      coins: this.purse,
+      stone: this.stone,
+      counts: this._counts(),
+      selected: this.placing?.def.id ?? null,
+    });
+  }
+
+  /**
+   * Every structure enemies can besiege: towers and quarries alike. Both expose
+   * the same small interface (`alive`, `blockRadius`, `root`, `takeDamage`), so
+   * the enemy code does not care which is which.
+   */
+  get _buildings() {
+    return [...this.towers, ...this.quarries, ...this.walls.values()];
   }
 
   /* ------------------------------------------------------------------ *
@@ -360,17 +427,17 @@ export class Game {
 
   /**
    * Intent priority: lower wins. Emergency repairs must never be shadowed by
-   * a luxury upgrade that happens to sit on the same build pad.
+   * a luxury upgrade.
    */
-  static PRIORITY = { repair: 0, chop: 1, build: 2, upgrade: 3 };
+  static PRIORITY = { repair: 0, chop: 1, upgrade: 2 };
 
   /**
    * @returns {Array<object>} every action available right now, with distances.
    *
    * Distances are computed here from the hero's live position rather than read
    * from each object's cached value. That cached value is refreshed by a
-   * different system (`_updateTrees` / `pad.update`), and depending on it would
-   * silently couple the prompt to the order those systems happen to run in.
+   * different system (`_updateTrees`), and depending on it would silently
+   * couple the prompt to the order those systems happen to run in.
    */
   _interactionCandidates() {
     const heroPos = this.player.root.position;
@@ -378,47 +445,53 @@ export class Game {
 
     const distTo = (x, z) => Math.hypot(heroPos.x - x, heroPos.z - z);
 
-    // --- Build pads: build or upgrade a gun tower ---
-    for (const pad of this.pads) {
-      const distance = distTo(pad.root.position.x, pad.root.position.z);
-      const action = pad.actionFor(distance, this.purse);
-      if (!action) continue;
+    // --- Structures: mend a battered one, otherwise offer an upgrade ---
+    for (const building of this._buildings) {
+      if (!building.alive) continue;
+      const distance = distTo(building.root.position.x, building.root.position.z);
+      if (distance >= BUILD.interactRange) continue;
 
-      const building = action.kind === 'build';
-      out.push({
-        kind: action.kind,
-        priority: building ? Game.PRIORITY.build : Game.PRIORITY.upgrade,
-        dist: distance,
-        enabled: action.enabled,
-        pad,
-        title: building ? 'Archer Tower' : `Archer Tower — Lv ${action.level}`,
-        sub: `<span class="cost">${action.cost}</span> coins to ${
-          building ? 'build' : 'upgrade'
-        }`,
-        verb: action.enabled ? (building ? 'BUILD' : 'UPGRADE') : `NEED ${action.cost}`,
-      });
-    }
+      if (building.isDamaged) {
+        const affordable = this.wood >= REPAIR.woodCost && this.stone >= REPAIR.stoneCost;
+        const label = building.canUpgrade
+          ? `${building.name} — Lv ${building.level}`
+          : building.name;
+        out.push({
+          kind: 'repair-tower',
+          priority: Game.PRIORITY.repair,
+          dist: distance,
+          enabled: affordable,
+          tower: building,
+          title: label,
+          sub:
+            `<span class="cost">${REPAIR.woodCost}</span> wood + ` +
+            `<span class="stone">${REPAIR.stoneCost}</span> stone &rarr; ` +
+            `<span class="heal">+${REPAIR.towerHealAmount}</span> HP &middot; ` +
+            `${Math.ceil(building.health)}/${building.maxHealth}`,
+          verb: affordable
+            ? 'REPAIR'
+            : this.wood < REPAIR.woodCost
+              ? `NEED ${REPAIR.woodCost} WOOD`
+              : `NEED ${REPAIR.stoneCost} STONE`,
+        });
+        continue;
+      }
 
-    // --- Towers: patch up a battered ballista with wood ---
-    for (const tower of this.towers) {
-      if (!tower.alive || !tower.isDamaged) continue;
-      const distance = distTo(tower.root.position.x, tower.root.position.z);
-      if (distance >= REPAIR.towerRange) continue;
-
-      const affordable = this.wood >= REPAIR.woodCost;
-      out.push({
-        kind: 'repair-tower',
-        priority: Game.PRIORITY.repair,
-        dist: distance,
-        enabled: affordable,
-        tower,
-        title: `Archer Tower — Lv ${tower.level}`,
-        sub:
-          `<span class="cost">${REPAIR.woodCost}</span> wood &rarr; ` +
-          `<span class="heal">+${REPAIR.towerHealAmount}</span> HP &middot; ` +
-          `${Math.ceil(tower.health)}/${tower.maxHealth}`,
-        verb: affordable ? 'REPAIR' : `NEED ${REPAIR.woodCost} WOOD`,
-      });
+      if (building.canUpgrade) {
+        const cost = building.upgradeCost;
+        const stoneCost = building.upgradeStoneCost ?? 0;
+        const affordable = this.purse >= cost && this.stone >= stoneCost;
+        out.push({
+          kind: 'upgrade',
+          priority: Game.PRIORITY.upgrade,
+          dist: distance,
+          enabled: affordable,
+          plot: building,
+          title: `${building.name} — Lv ${building.level}`,
+          sub: this._costLine(cost, stoneCost, `to upgrade to Lv ${building.level + 1}`),
+          verb: affordable ? 'UPGRADE' : this._shortfall({ cost, stoneCost }),
+        });
+      }
     }
 
     // --- Trees: chop for wood ---
@@ -439,24 +512,43 @@ export class Game {
       });
     }
 
-    // --- Keep: spend wood to patch it up ---
+    // --- Keep: spend wood + stone to patch it up ---
     const keepDist = distTo(0, 0);
     if (keepDist < REPAIR.range && this.keep.health < this.keep.maxHealth) {
-      const affordable = this.wood >= REPAIR.woodCost;
+      const affordable = this.wood >= REPAIR.woodCost && this.stone >= REPAIR.stoneCost;
       out.push({
         kind: 'repair',
         priority: Game.PRIORITY.repair,
         dist: keepDist,
         enabled: affordable,
         title: 'Repair Keep',
-        sub: `<span class="cost">${REPAIR.woodCost}</span> wood &rarr; <span class="heal">+${
-          REPAIR.healAmount
-        }</span> keep HP`,
-        verb: affordable ? 'REPAIR' : `NEED ${REPAIR.woodCost} WOOD`,
+        sub:
+          `<span class="cost">${REPAIR.woodCost}</span> wood + ` +
+          `<span class="stone">${REPAIR.stoneCost}</span> stone &rarr; ` +
+          `<span class="heal">+${REPAIR.healAmount}</span> keep HP`,
+        verb: affordable
+          ? 'REPAIR'
+          : this.wood < REPAIR.woodCost
+            ? `NEED ${REPAIR.woodCost} WOOD`
+            : `NEED ${REPAIR.stoneCost} STONE`,
       });
     }
 
     return out;
+  }
+
+  /** "40 coins + 6 stone to build" — the cost clause shared by build prompts. */
+  _costLine(coins, stone, suffix) {
+    const parts = [`<span class="cost">${coins}</span> coins`];
+    if (stone > 0) parts.push(`<span class="stone">${stone}</span> stone`);
+    return `${parts.join(' + ')} ${suffix}`;
+  }
+
+  /** Why an action is disabled: which resource the hero is short of. */
+  _shortfall(action) {
+    if (this.purse < action.cost) return `NEED ${action.cost} COINS`;
+    if (this.stone < action.stoneCost) return `NEED ${action.stoneCost} STONE`;
+    return 'GO';
   }
 
   /**
@@ -486,6 +578,12 @@ export class Game {
   interact() {
     if (this.state !== 'playing') return;
 
+    // While siting a structure the action button means "place it here".
+    if (this.placing) {
+      this._tryPlace();
+      return;
+    }
+
     const action = this._findInteraction();
     if (!action) return;
 
@@ -496,11 +594,8 @@ export class Game {
     }
 
     switch (action.kind) {
-      case 'build':
-        this._buildTower(action.pad);
-        break;
       case 'upgrade':
-        this._upgradeTower(action.pad);
+        this._upgradeStructure(action.plot);
         break;
       case 'chop':
         this._chopTree(action.tree);
@@ -514,6 +609,309 @@ export class Game {
       default:
         break;
     }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Build list + free placement
+   *
+   * Structures are not tied to fixed pads. The player opens the build list,
+   * picks one, and a translucent ghost is sited at the hero's feet — walk to a
+   * clear spot, then PLACE. Validity is checked against the keep plaza, other
+   * structures, trees and scenery.
+   * ------------------------------------------------------------------ */
+
+  toggleBuildMenu() {
+    if (this.state !== 'playing') return;
+    this.buildOpen = !this.buildOpen;
+    this.hud.setBuildMenuOpen(this.buildOpen);
+    this._refreshBuildMenu();
+  }
+
+  closeBuildMenu() {
+    this.buildOpen = false;
+    this.hud.setBuildMenuOpen(false);
+  }
+
+  /** Cancel key: leave placement if siting, otherwise close the build list. */
+  cancelOrClose() {
+    if (this.placing) this.cancelPlacement();
+    else if (this.buildOpen) this.closeBuildMenu();
+  }
+
+  /** A card was tapped: start placing that building, or cancel if already. */
+  pickBuilding(id) {
+    if (this.state !== 'playing') return;
+    if (this.placing?.def.id === id) {
+      this.cancelPlacement();
+      return;
+    }
+    this.beginPlacement(id);
+  }
+
+  /** Enter placement mode for a building, showing its translucent ghost. */
+  beginPlacement(id) {
+    const def = buildDef(id);
+    if (!def) return;
+
+    this.cancelPlacement();
+    this.placing = { def };
+    this._ghostKey = null;
+    this._makeGhost(def, {});
+    this.hud.setPlacing(true);
+    this._refreshBuildMenu();
+  }
+
+  /** (Re)create the placement ghost for `def`, shaped by `mask` when relevant. */
+  _makeGhost(def, mask) {
+    if (this.ghost) {
+      this.scene.remove(this.ghost);
+      this._disposeGhost(this.ghost);
+      this.ghost = null;
+    }
+    this.ghost = def.preview(1, mask);
+    this._styleGhost(this.ghost);
+    this.scene.add(this.ghost);
+  }
+
+  /** Tear down the ghost and leave placement mode. */
+  cancelPlacement() {
+    if (this.ghost) {
+      this.scene.remove(this.ghost);
+      this._disposeGhost(this.ghost);
+      this.ghost = null;
+    }
+    this._ghostMaterials = [];
+    this._ghostKey = null;
+    this.placing = null;
+    this.hud.setPlacing(false);
+    this._refreshBuildMenu();
+  }
+
+  /** Dispose a ghost subtree's geometry and materials exactly once each. */
+  _disposeGhost(group) {
+    const geometries = new Set();
+    group.traverse((o) => {
+      if (!o.isMesh) return;
+      if (o.geometry) geometries.add(o.geometry);
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) m.dispose();
+    });
+    for (const geo of geometries) geo.dispose();
+  }
+
+  /** Grid key for a wall cell. */
+  _wallKey(i, j) {
+    return `${i},${j}`;
+  }
+
+  /** Which neighbouring cells hold a wall piece. */
+  _wallMask(i, j) {
+    return {
+      n: this.walls.has(this._wallKey(i, j - 1)),
+      s: this.walls.has(this._wallKey(i, j + 1)),
+      e: this.walls.has(this._wallKey(i + 1, j)),
+      w: this.walls.has(this._wallKey(i - 1, j)),
+    };
+  }
+
+  /**
+   * Where a piece actually sits. Most structures go at the hero's feet; walls
+   * snap to the shared grid so neighbouring pieces line up.
+   */
+  _placementPoint(def, x, z) {
+    if (def.connects) {
+      const c = WALL.cell;
+      const i = Math.round(x / c);
+      const j = Math.round(z / c);
+      return { x: i * c, z: j * c, i, j };
+    }
+    return { x, z };
+  }
+
+  /** Re-shape a wall's four neighbours after a piece is added or removed. */
+  _refreshWallNeighbours(i, j) {
+    for (const [di, dj] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
+      const ni = i + di;
+      const nj = j + dj;
+      const w = this.walls.get(this._wallKey(ni, nj));
+      if (w) w.setMask(this._wallMask(ni, nj));
+    }
+  }
+
+  /** Make a freshly built preview translucent and collect its materials. */
+  _styleGhost(root) {
+    this._ghostMaterials = [];
+    root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      o.castShadow = false;
+      o.receiveShadow = false;
+      o.renderOrder = 6;
+
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const cloned = mats.map((m) => {
+        const c = m.clone();
+        c.transparent = true;
+        c.opacity = 0.5;
+        c.depthWrite = false;
+        if (c.emissive) {
+          c.emissive = c.emissive.clone();
+          c.emissive.setHex(0x000000);
+          this._ghostMaterials.push(c);
+        }
+        return c;
+      });
+      o.material = cloned.length === 1 ? cloned[0] : cloned;
+    });
+  }
+
+  /**
+   * Follow the hero with the ghost and tint it by validity.
+   * @returns {boolean} whether the current spot is buildable.
+   */
+  _updatePlacement() {
+    if (!this.placing || !this.ghost) return true;
+
+    const def = this.placing.def;
+    const p = this.player.root.position;
+    const pt = this._placementPoint(def, p.x, p.z);
+
+    // Wall ghosts re-shape to match the neighbours they would connect to.
+    if (def.connects) {
+      const key = this._wallKey(pt.i, pt.j);
+      if (key !== this._ghostKey) {
+        this._ghostKey = key;
+        this._makeGhost(def, this._wallMask(pt.i, pt.j));
+      }
+    }
+
+    this.ghost.position.set(pt.x, 0, pt.z);
+    // A lone wall piece turns to face the keep; the ghost previews that turn.
+    if (def.connects) {
+      const mask = this._wallMask(pt.i, pt.j);
+      this.ghost.rotation.y = wallYaw(mask, pt.x, pt.z);
+    }
+
+    const valid = this._placementValid(def, pt);
+    const tint = valid ? BUILD.validTint : BUILD.invalidTint;
+    for (const m of this._ghostMaterials) {
+      m.emissive.setHex(tint);
+      m.emissiveIntensity = 0.35 + Math.sin(performance.now() / 150) * 0.12;
+    }
+    return valid;
+  }
+
+  /** Can `def` stand at `pt` (an already-snapped placement point)? */
+  _placementValid(def, pt) {
+    const { x, z } = pt;
+    const limit = WORLD.size - BUILD.edgeMargin;
+    if (Math.abs(x) > limit || Math.abs(z) > limit) return false;
+
+    // Keep plaza. Walls may ring the keep more tightly than freestanding builds.
+    const keepClear = def.connects ? WALL.keepClearance : BUILD.keepClearance;
+    if (Math.hypot(x, z) < keepClear + def.blockRadius) return false;
+
+    // One wall piece per grid cell.
+    if (def.connects && this.walls.has(this._wallKey(pt.i, pt.j))) return false;
+
+    // Other structures. Walls are governed by the grid rule above, so a wall
+    // skips them; anything else just keeps a berth from a wall's footprint.
+    for (const b of this._buildings) {
+      if (b.kind === 'wall') {
+        if (def.connects) continue;
+        const dw = Math.hypot(x - b.root.position.x, z - b.root.position.z);
+        if (dw < def.blockRadius + WALL.blockRadius) return false;
+        continue;
+      }
+      const d = Math.hypot(x - b.root.position.x, z - b.root.position.z);
+      if (d < def.blockRadius + b.blockRadius + BUILD.spacing) return false;
+    }
+
+    // Standing trees (felled ones stop blocking).
+    for (const tree of this.trees) {
+      if (!tree.blocks) continue;
+      const d = Math.hypot(x - tree.x, z - tree.z);
+      if (d < def.blockRadius + tree.blockRadius + 0.3) return false;
+    }
+
+    // Scenery: rocks, houses, fences.
+    for (const c of this.world.colliders) {
+      const d = Math.hypot(x - c.x, z - c.z);
+      if (d < def.blockRadius + c.r + 0.3) return false;
+    }
+
+    return true;
+  }
+
+  /** Place the ghost as a real structure, if the site and stock allow. */
+  _tryPlace() {
+    const def = this.placing?.def;
+    if (!def) return false;
+
+    const p = this.player.root.position;
+    const pt = this._placementPoint(def, p.x, p.z);
+
+    if (!this._placementValid(def, pt)) {
+      this.sfx.denied();
+      this.hud.floater(new THREE.Vector3(pt.x, 2.2, pt.z), "CAN'T BUILD HERE", 'bad');
+      return false;
+    }
+
+    const price = def.cost(this._counts()[def.id] ?? 0);
+    if (this.purse < price.coins || this.stone < price.stone) {
+      this.sfx.denied();
+      return false;
+    }
+
+    this.purse -= price.coins;
+    this.stone -= price.stone;
+    this.hud.setCoins(this.purse);
+    this.hud.setStone(this.stone);
+
+    const opts = { effects: this.effects, projectiles: this.projectiles, sfx: this.sfx };
+    if (def.connects) {
+      opts.cell = { i: pt.i, j: pt.j };
+      opts.mask = this._wallMask(pt.i, pt.j);
+    }
+    const structure = def.create(this.scene, new THREE.Vector3(pt.x, 0, pt.z), opts);
+
+    if (def.id === 'quarry') {
+      this.quarries.push(structure);
+      this.stats.quarries += 1;
+    } else if (def.id === 'wall') {
+      this.walls.set(this._wallKey(pt.i, pt.j), structure);
+      this.stats.walls += 1;
+      // The new piece connects its neighbours, which re-shape to meet it.
+      this._refreshWallNeighbours(pt.i, pt.j);
+    } else {
+      this.towers.push(structure);
+      this.stats.towers += 1;
+    }
+
+    this.sfx.build();
+    this.effects.burst(new THREE.Vector3(pt.x, 1.4, pt.z), {
+      count: 16,
+      color: 0xd8b071,
+      speed: 6,
+      size: 0.26,
+      life: 0.8,
+      gravity: 16,
+    });
+    this.effects.burst(new THREE.Vector3(pt.x, 1.8, pt.z), {
+      count: 8,
+      color: 0xffe27a,
+      speed: 5,
+      size: 0.18,
+      life: 0.7,
+      gravity: 12,
+    });
+    this.hud.floater(
+      new THREE.Vector3(pt.x, 2.4, pt.z),
+      `${def.name.toUpperCase()} BUILT`,
+      'good'
+    );
+
+    this.cancelPlacement();
+    return true;
   }
 
   /* ------------------------------------------------------------------ *
@@ -567,11 +965,13 @@ export class Game {
   }
 
   _repairKeep() {
-    if (this.wood < REPAIR.woodCost) return false;
+    if (this.wood < REPAIR.woodCost || this.stone < REPAIR.stoneCost) return false;
     if (this.keep.health >= this.keep.maxHealth) return false;
 
     this.wood -= REPAIR.woodCost;
+    this.stone -= REPAIR.stoneCost;
     this.hud.setWood(this.wood);
+    this.hud.setStone(this.stone);
     this.keep.repair(REPAIR.healAmount);
     this.keep.healFlash = 0.6;
     this.stats.repairs += 1;
@@ -591,13 +991,15 @@ export class Game {
     return true;
   }
 
-  /** Patch up a battered ballista with wood. Same resource, same verb. */
+  /** Patch up a battered tower or quarry. Same resources, same verb. */
   _repairTower(tower) {
-    if (this.wood < REPAIR.woodCost) return false;
+    if (this.wood < REPAIR.woodCost || this.stone < REPAIR.stoneCost) return false;
     if (!tower.repair(REPAIR.towerHealAmount)) return false;
 
     this.wood -= REPAIR.woodCost;
+    this.stone -= REPAIR.stoneCost;
     this.hud.setWood(this.wood);
+    this.hud.setStone(this.stone);
     this.stats.repairs += 1;
 
     const pos = new THREE.Vector3(tower.root.position.x, 2.6, tower.root.position.z);
@@ -610,60 +1012,43 @@ export class Game {
       gravity: -2,
     });
     this.sfx.repair();
-    this.hud.floater(pos, `+${REPAIR.towerHealAmount} TOWER`, 'heal');
+    this.hud.floater(pos, `+${REPAIR.towerHealAmount} ${tower.kind === 'quarry' ? 'QUARRY' : 'TOWER'}`, 'heal');
     return true;
   }
 
   /* ------------------------------------------------------------------ *
-   * Towers
+   * Structures
    * ------------------------------------------------------------------ */
 
-  _buildTower(pad) {
-    if (this.purse < pad.cost) return false;
-    this.purse -= pad.cost;
-    this.hud.setCoins(this.purse);
-
-    const tower = new Tower(this.scene, pad.root.position, {
-      effects: this.effects,
-      projectiles: this.projectiles,
-      sfx: this.sfx,
-    });
-    this.towers.push(tower);
-    pad.setBuilt(tower);
-
-    this.stats.towers += 1;
-    this.sfx.build();
-    this.effects.burst(
-      new THREE.Vector3(pad.root.position.x, 1.2, pad.root.position.z),
-      { count: 14, color: 0xd8b071, speed: 6, size: 0.26, life: 0.8, gravity: 16 }
-    );
-    this.effects.burst(
-      new THREE.Vector3(pad.root.position.x, 1.6, pad.root.position.z),
-      { count: 8, color: 0xffe27a, speed: 5, size: 0.18, life: 0.7, gravity: 12 }
-    );
-    this.hud.floater(pad.root.position, 'TOWER BUILT', 'good');
-    this._refreshPadCosts();
-    return true;
-  }
-
-  _upgradeTower(pad) {
-    const tower = pad.built;
-    const cost = tower.upgradeCost;
-    if (!tower.canUpgrade || this.purse < cost) return false;
+  /** Spend coins + stone to raise a standing structure a tier. */
+  _upgradeStructure(structure) {
+    if (!structure) return false;
+    const cost = structure.upgradeCost;
+    const stoneCost = structure.upgradeStoneCost ?? 0;
+    if (!structure.canUpgrade || this.purse < cost || this.stone < stoneCost) return false;
 
     this.purse -= cost;
+    this.stone -= stoneCost;
     this.hud.setCoins(this.purse);
-    tower.upgrade();
+    this.hud.setStone(this.stone);
+
+    structure.upgrade();
     this.sfx.build();
-    this.effects.burst(
-      new THREE.Vector3(pad.root.position.x, 1.8, pad.root.position.z),
-      { count: 18, color: 0xffd166, speed: 7, size: 0.24, life: 0.9, gravity: 14 }
-    );
+    const base = structure.root.position;
+    this.effects.burst(new THREE.Vector3(base.x, 1.8, base.z), {
+      count: 18,
+      color: 0xffd166,
+      speed: 7,
+      size: 0.24,
+      life: 0.9,
+      gravity: 14,
+    });
     this.hud.floater(
-      new THREE.Vector3(pad.root.position.x, 2.6, pad.root.position.z),
-      `LV ${tower.level}`,
+      new THREE.Vector3(base.x, 2.6, base.z),
+      `LV ${structure.level}`,
       'good'
     );
+    this._refreshBuildMenu();
     return true;
   }
 
@@ -684,16 +1069,22 @@ export class Game {
       pos.z = (pos.z / d) * KEEP_BLOCK_RADIUS;
     }
 
-    // Towers are wide stone structures now, so keep a respectful berth.
-    for (const t of this.towers) {
-      const dx = pos.x - t.root.position.x;
-      const dz = pos.z - t.root.position.z;
-      const d = Math.hypot(dx, dz);
-      const r = t.blockRadius + 0.3;
-      if (d < r && d > 0.0001) {
-        pos.x = t.root.position.x + (dx / d) * r;
-        pos.z = t.root.position.z + (dz / d) * r;
+    // Towers, quarries and walls are solid, so keep a respectful berth. The
+    // zero-distance fallback shoves the hero out along +X when he ends up dead
+    // centre inside a structure (a big step can jump past the rim in one frame).
+    for (const b of this._buildings) {
+      let dx = pos.x - b.root.position.x;
+      let dz = pos.z - b.root.position.z;
+      let d = Math.hypot(dx, dz);
+      const r = b.blockRadius + 0.3;
+      if (d >= r) continue;
+      if (d < 0.0001) {
+        dx = 1;
+        dz = 0;
+        d = 1;
       }
+      pos.x = b.root.position.x + (dx / d) * r;
+      pos.z = b.root.position.z + (dz / d) * r;
     }
 
     // Scenery.
@@ -798,7 +1189,8 @@ export class Game {
 
     const ctx = {
       enemies: this.enemies,
-      towers: this.towers,
+      // Enemies besiege towers and quarries alike; both expose the same interface.
+      towers: this._buildings,
       camera: this.camera,
       onAttackKeep: (enemy, damage) => {
         this.keep.damage(damage, new THREE.Vector3(
@@ -807,21 +1199,31 @@ export class Game {
           enemy.root.position.z
         ));
       },
-      onAttackTower: (enemy, damage, tower) => {
-        // Towers are timber, so they chip rather than shatter.
-        const dealt = Math.max(1, Math.round(damage * TOWER.damageTakenScale));
-        tower.takeDamage(dealt);
+      onAttackTower: (enemy, damage, building) => {
+        // Structures are hacked at rather than shattered, so they chip slowly.
+        const scale =
+          building.kind === 'quarry' ? QUARRY.damageTakenScale : TOWER.damageTakenScale;
+        const dealt = Math.max(1, Math.round(damage * scale));
+        building.takeDamage(dealt);
         this.sfx.towerHit();
         this.effects.sparks(
-          new THREE.Vector3(tower.root.position.x, 1.5, tower.root.position.z),
+          new THREE.Vector3(building.root.position.x, 1.5, building.root.position.z),
           4
         );
         this.hud.floater(
-          new THREE.Vector3(tower.root.position.x, tower.badgeHeight, tower.root.position.z),
+          new THREE.Vector3(building.root.position.x, building.badgeHeight, building.root.position.z),
           `-${dealt}`,
           'bad'
         );
-        if (tower.destroyed) this.hud.callout('TOWER DOWN', 'Rebuild or defend', 1.6, 'warn');
+        if (building.destroyed) {
+          const quarry = building.kind === 'quarry';
+          this.hud.callout(
+            quarry ? 'QUARRY DOWN' : 'TOWER DOWN',
+            quarry ? 'Your stone supply is cut' : 'Rebuild or defend',
+            1.6,
+            'warn'
+          );
+        }
         void enemy;
       },
       onAttackHero: (enemy, damage) => {
@@ -849,21 +1251,52 @@ export class Game {
       }
     }
 
-    // --- Pads + towers ---
-    for (const pad of this.pads) pad.update(dt, this.player.root.position, this.purse);
+    // --- Structures ---
     for (const t of this.towers) t.update(dt, this.enemies);
+    for (const w of this.walls.values()) w.update(dt);
 
-    // Collapsed towers leave rubble; free the pad for a discounted rebuild.
-    for (let i = this.towers.length - 1; i >= 0; i--) {
-      const t = this.towers[i];
-      if (!t.collapseFinished) continue;
-
-      const pad = this.pads.find((p) => p.built === t);
-      if (pad) pad.releaseTower(REPAIR.rebuildDiscount);
-      t.dispose();
-      this.towers.splice(i, 1);
-      this._refreshPadCosts();
+    // Quarries tick their stone output every few seconds.
+    for (const q of this.quarries) {
+      q.update(dt, {
+        onYield: (amount, pos) => {
+          this._addStone(amount, pos);
+          this.sfx.stone();
+          this.effects.burst(pos, {
+            count: 6,
+            color: P.stoneRes,
+            speed: 3.4,
+            size: 0.16,
+            life: 0.7,
+            gravity: 14,
+          });
+        },
+      });
     }
+
+    // Collapsed structures topple into rubble and are removed. The player can
+    // simply build a fresh one anywhere, so no pad is freed.
+    for (const list of [this.towers, this.quarries]) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const b = list[i];
+        if (!b.collapseFinished) continue;
+        b.dispose();
+        list.splice(i, 1);
+      }
+    }
+
+    // A lost wall piece leaves a gap: drop it and re-shape what remains.
+    if (this.walls.size) {
+      for (const [key, w] of [...this.walls]) {
+        if (!w.collapseFinished) continue;
+        const [i, j] = key.split(',').map(Number);
+        w.dispose();
+        this.walls.delete(key);
+        this._refreshWallNeighbours(i, j);
+      }
+    }
+
+    // Keep the build list's prices and affordability in step with the purse.
+    this._refreshBuildMenu();
 
     // --- Projectiles ---
     this.projectiles.update(dt, this.enemies, (enemy, damage, point) => {
@@ -903,7 +1336,8 @@ export class Game {
       }
     }
 
-    // --- HUD + prompt ---
+    // --- Placement ghost + HUD/prompt ---
+    this._placingValid = this._updatePlacement();
     this._updatePrompt();
     this.hud.setKeep(this.keep.healthRatio, this.keep.health, this.keep.maxHealth);
     this.hud.setHero(this.player.healthRatio);
@@ -959,6 +1393,31 @@ export class Game {
   }
 
   _updatePrompt() {
+    // Placement mode owns the prompt: it is the "place it here" confirmation.
+    if (this.placing) {
+      const def = this.placing.def;
+      const price = def.cost(this._counts()[def.id] ?? 0);
+      const affordable = this.purse >= price.coins && this.stone >= price.stone;
+      const valid = this._placingValid !== false;
+      const enabled = valid && affordable;
+
+      let suffix = '&middot; press to place';
+      if (!valid) suffix = '&middot; blocked &mdash; find clear ground';
+      else if (!affordable) suffix = '&middot; not enough resources';
+
+      this.hud.setPrompt({
+        title: `Build ${def.name}`,
+        sub: this._costLine(price.coins, price.stone, suffix),
+        enabled,
+        label: enabled
+          ? 'PLACE'
+          : valid
+            ? this._shortfall({ cost: price.coins, stoneCost: price.stone })
+            : "CAN'T PLACE",
+      });
+      return;
+    }
+
     const action = this._findInteraction();
     if (!action) {
       this.hud.setPrompt(null);
@@ -1212,6 +1671,8 @@ export class Game {
     this.input.release();
     this.waves.stop();
     this.sfx.gameOver();
+    this.cancelPlacement();
+    this.closeBuildMenu();
     this.hud.setPrompt(null);
 
     const s = this.stats;
@@ -1219,8 +1680,8 @@ export class Game {
     this.hud.el.goStats.innerHTML =
       `${subtitle}<br />` +
       `<b>${s.waves}</b> waves survived · <b>${s.kills}</b> kills · ` +
-      `<b>${s.towers}</b> towers · <b>${s.coins}</b> coins looted<br />` +
-      `<b>${s.wood}</b> wood chopped · <b>${s.repairs}</b> repairs`;
+      `<b>${s.towers}</b> towers · <b>${s.quarries}</b> quarries · <b>${s.walls}</b> walls · <b>${s.coins}</b> coins looted<br />` +
+      `<b>${s.wood}</b> wood chopped · <b>${s.stone}</b> stone cut · <b>${s.repairs}</b> repairs`;
     this.hud.showGameOver(true);
   }
 

@@ -62,6 +62,27 @@ export const PALETTE = {
 
   muzzle: 0xffe9a3,
   blood: 0xff5a3c,
+
+  /*
+   * The stone quarry. Cool, blue-grey granite so it reads as a different
+   * material from the keep's warm timber and the tower's pale field stone, plus
+   * the split stone that is the game's third resource.
+   */
+  quarryRock: 0x8a929c,
+  quarryRockLight: 0xaab2bc,
+  quarryRockDark: 0x6b727b,
+  gravel: 0x9c9585,
+  gravelDark: 0x7c7566,
+  /** Cut-block resource colour: the HUD stone chip + floating numbers. */
+  stoneRes: 0xc2cbd6,
+
+  /*
+   * The perimeter wall: rougher, cooler fieldstone than the tower's dressed
+   * ashlar, so a rampart reads as a different build at a glance.
+   */
+  wallStone: 0x938d80,
+  wallStoneLight: 0xada797,
+  wallStoneDark: 0x716b5e,
 };
 
 /** World / map constants. Units are metres. */
@@ -74,6 +95,24 @@ export const WORLD = {
   spawnRadius: 31,
   /** Player speed in units/second. */
   playerSpeed: 7.4,
+};
+
+/**
+ * Free-placement rules. Structures are no longer tied to fixed pads: the hero
+ * may raise one anywhere that is clear, so these are the only constraints.
+ */
+export const BUILD = {
+  /** Nothing may be raised inside this radius of the keep's plaza. */
+  keepClearance: 7.8,
+  /** Minimum gap between two structures' footprints. */
+  spacing: 1.3,
+  /** How far inside the map edge a structure may sit. */
+  edgeMargin: 5.0,
+  /** How close the hero must stand to upgrade or repair a structure. */
+  interactRange: 3.8,
+  /** Ghost preview tints. */
+  validTint: 0x7dff8a,
+  invalidTint: 0xff6b6b,
 };
 
 /** The player hero. */
@@ -114,14 +153,27 @@ export const HERO = {
  * Towers are living structures: they have health, enemies besiege them, and the
  * hero patches them up with wood. A tower reduced to zero collapses into rubble
  * and its pad can be rebuilt at a discount.
+ *
+ * Raising a tower also costs **stone**, which is cut at the quarry. Coins pay
+ * for the timber and labour; stone is the actual masonry, and without it there
+ * is nothing to build a tower out of.
  */
 export const TOWER = {
+  name: 'Archer Tower',
   buildCost: 40,
-  /** Each subsequent tower costs this much more. */
+  /** Stone blocks needed on top of the coins for a brand-new tower. */
+  stoneCost: 6,
+  /** Each subsequent tower costs this much more (coins and stone). */
   costStep: 20,
+  stoneStep: 2,
   maxLevel: 3,
   /** Cost multiplier applied to the base cost per upgrade level. */
   upgradeCostScale: [1, 1.6, 2.4],
+  /**
+   * Stone per upgrade, indexed by the tower's *current* level (so a level-1
+   * tower costs `upgradeStone[1]` stone to reach level 2).
+   */
+  upgradeStone: [0, 8, 14],
 
   /**
    * Collision radius enemies stop at when besieging a tower. Larger than the
@@ -142,6 +194,92 @@ export const TOWER = {
     { damage: 24, fireRate: 1.05, range: 13.0, projectileSpeed: 46, maxHealth: 210 },
     { damage: 36, fireRate: 1.25, range: 14.5, projectileSpeed: 52, maxHealth: 300 },
   ],
+};
+
+/**
+ * Stone — the third resource, and the one that gates real construction.
+ *
+ * Coins are looted from the fallen and wood is chopped from the forest, but
+ * **stone can only be cut at a quarry the player raises**. Towers cost stone to
+ * raise and upgrade, and every repair costs a little stone as well, so a run
+ * with no quarry quickly runs out of the means to build or mend anything.
+ */
+export const STONE = {
+  /** Stone in hand at the start of a run. Zero: the quarry is the only source. */
+  starting: 0,
+};
+
+/**
+ * The stone quarry: a working open-cast pit cut into the map.
+ *
+ * Unlike a tower it mounts no weapon — it is an *economy* building. It drip-
+ * feeds stone while it stands, and like every structure it has health, can be
+ * besieged, and is mended with wood.
+ *
+ * It deliberately costs **coins only**. Stone cannot buy the mine that produces
+ * stone, so a run can never be locked out of its own resource.
+ */
+export const QUARRY = {
+  name: 'Stone Quarry',
+  /** Coins to open the pit. No stone — this is where stone comes from. */
+  buildCost: 30,
+  /** Each subsequent quarry costs this much more. */
+  costStep: 15,
+  maxLevel: 3,
+  upgradeCostScale: [1, 1.5, 2.2],
+
+  /** Collision radius enemies stop at when besieging the quarry. */
+  blockRadius: 1.6,
+  collapseTime: 1.3,
+  /** Same timber-not-masonry reduction towers enjoy. */
+  damageTakenScale: 0.6,
+
+  /**
+   * Per-tier output. A quarry yields `stonePerYield` stone every
+   * `yieldInterval` seconds, so upgrading buys both a bigger stockpile and a
+   * faster trickle. Level 1 pays roughly one stone every three seconds.
+   */
+  levels: [
+    { maxHealth: 130, stonePerYield: 2, yieldInterval: 6.5 },
+    { maxHealth: 190, stonePerYield: 3, yieldInterval: 5.0 },
+    { maxHealth: 260, stonePerYield: 5, yieldInterval: 4.0 },
+  ],
+};
+
+/**
+ * The perimeter wall — the one structure that *connects*.
+ *
+ * Pieces snap to a shared grid and each rebuilds its own shape from whichever
+ * neighbours exist, so the player can lay a continuous rampart around the keep
+ * one piece at a time (straights, corners, T-junctions and ends all emerge from
+ * the neighbour mask).
+ *
+ * Every piece is a real structure with its own health: enemies batter the wall
+ * instead of walking to the keep, and the hero mends it with wood + stone.
+ * Walls are cheap and do not upgrade — their value is in numbers and coverage.
+ */
+export const WALL = {
+  name: 'Stone Wall',
+  /** Flat price — a wall you must buy twenty of can't escalate per piece. */
+  buildCost: 12,
+  stoneCost: 3,
+  /** Grid pitch. Pieces snap to multiples of this, centred on the world origin. */
+  cell: 3.4,
+  /**
+   * Collision/aggro radius for one piece. Half the cell means neighbouring
+   * pieces' circles overlap, so a wall line is a continuous barrier to the hero
+   * and one long siege target to the horde.
+   */
+  blockRadius: 1.7,
+  /** Nothing may be raised closer to the keep centre than this (plus radius). */
+  keepClearance: 5.0,
+  collapseTime: 1.1,
+  /** Fieldstone, not timber — enemies chip it, but slower than a tower. */
+  damageTakenScale: 0.7,
+  maxHealth: 160,
+  /** Wall profile, also consumed by the model builder. */
+  thickness: 0.6,
+  height: 1.95,
 };
 
 /**
@@ -222,23 +360,23 @@ export const TREE = {
 };
 
 /**
- * Repairing with wood. Coins build things; wood mends them. Keeping that split
- * means the player always knows which resource answers which problem.
+ * Repairing. Wood is the patch, stone is the filler: every mend costs a little
+ * of each, so a player who has run dry of quarry stone can't patch a breach
+ * either. Keeping the split (coins build, wood + stone mend) means the player
+ * always knows which resource answers which problem.
  */
 export const REPAIR = {
-  /** Wood spent per repair action (both the keep and towers). */
+  /** Wood spent per repair action (the keep, towers and quarries alike). */
   woodCost: 1,
+  /** Stone spent per repair action, on top of the wood. */
+  stoneCost: 2,
   /** Keep health restored per repair action. */
   healAmount: 12,
   /** How close the hero must stand to the keep to repair it (keep blocks at 5.3). */
   range: 9.0,
 
-  /** Tower health restored per repair action — towers are smaller than a keep. */
+  /** Structure health restored per repair action — smaller than a keep. */
   towerHealAmount: 45,
-  /** How close the hero must stand to a tower to repair it. */
-  towerRange: 3.6,
-  /** Rebuilding a collapsed tower costs this fraction of a fresh one. */
-  rebuildDiscount: 0.5,
 };
 
 /**
