@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { QUARRY } from './config.js';
+import { FEEL, QUARRY } from './config.js';
 import { createQuarry } from './models.js';
 import { buildHealthBar, healthBarColor } from './buildingUtils.js';
 import { clamp } from './utils.js';
@@ -35,7 +35,7 @@ export class Quarry {
     /** Enemies stop at this radius to hack at the quarry. */
     this.blockRadius = QUARRY.blockRadius;
     /** Clear of the derrick, for the floating health bar. */
-    this.badgeHeight = built.parts.badgeHeight ?? 2.6;
+    this.badgeHeight = built.parts.badgeHeight ?? FEEL.quarry.badgeHeight;
 
     this.maxHealth = 1;
     this.health = 1;
@@ -99,13 +99,13 @@ export class Quarry {
 
   /** Sphere centre enemies use to find and hit this quarry. */
   centerWorld(out = this._center) {
-    return out.set(this.root.position.x, this.root.position.y + 1.6, this.root.position.z);
+    return out.set(this.root.position.x, this.root.position.y + FEEL.quarry.centreY, this.root.position.z);
   }
 
   takeDamage(amount) {
     if (this.destroyed) return;
     this.health = Math.max(0, this.health - amount);
-    this.hitFlash = 0.16;
+    this.hitFlash = FEEL.hitFlash;
     if (this.health <= 0) this._collapse();
   }
 
@@ -244,11 +244,11 @@ export class Quarry {
     const t = this.collapseT;
     const eased = t * t;
 
-    this.root.rotation.z = eased * (Math.PI / 2 - 0.15) * this._fallDir;
-    this.root.position.y = -eased * 0.55;
+    this.root.rotation.z = eased * FEEL.collapse.lean * this._fallDir;
+    this.root.position.y = -eased * FEEL.collapse.sink;
 
     // Fade out late, so the topple reads before it disappears.
-    const fade = Math.max(0, t - 0.55) / 0.45;
+    const fade = Math.max(0, t - FEEL.collapse.fadeStart) / FEEL.collapse.fadeSpan;
     if (!this._faded) {
       for (const m of this.materials) {
         m.transparent = true;

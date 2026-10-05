@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HUDCFG } from './config.js';
 import { clamp } from './utils.js';
 
 /**
@@ -208,14 +209,14 @@ export class HUD {
     if (this.el.keepFill) {
       this.el.keepFill.style.width = `${pct}%`;
       this.el.keepFill.style.background =
-        pct > 55 ? 'linear-gradient(180deg,#7ee06a,#3fa83a)'
-        : pct > 25 ? 'linear-gradient(180deg,#ffd85e,#e5a013)'
+        pct > HUDCFG.keepGoodPct ? 'linear-gradient(180deg,#7ee06a,#3fa83a)'
+        : pct > HUDCFG.keepWarnPct ? 'linear-gradient(180deg,#ffd85e,#e5a013)'
         : 'linear-gradient(180deg,#ff7b62,#c62f1c)';
     }
     if (this.el.keepText) this.el.keepText.textContent = `${Math.ceil(hp)} / ${max}`;
 
     // Nudge the player toward the wood chip once the keep is actually damaged.
-    this.el.woodChip?.classList.toggle('urgent', pct < 99.5 && pct > 0);
+    this.el.woodChip?.classList.toggle('urgent', pct < HUDCFG.woodUrgentPct && pct > 0);
   }
 
   setHero(ratio) {
@@ -269,7 +270,7 @@ export class HUD {
   }
 
   /** Big centered banner, e.g. "WAVE 3" / "WAVE CLEARED". */
-  callout(title, sub = '', duration = 2.2, tone = '') {
+  callout(title, sub = '', duration = HUDCFG.calloutDuration, tone = '') {
     const el = this.el.callout;
     if (!el) return;
     el.innerHTML = `<div class="callout-title ${tone}">${title}</div>${
@@ -297,11 +298,11 @@ export class HUD {
     this.floaters.push({
       el,
       pos: worldPos.clone(),
-      life: 0.85,
-      maxLife: 0.85,
+      life: HUDCFG.floater.life,
+      maxLife: HUDCFG.floater.life,
       jitter: (Math.random() - 0.5) * 22,
     });
-    if (this.floaters.length > 40) {
+    if (this.floaters.length > HUDCFG.maxFloaters) {
       const old = this.floaters.shift();
       old.el.remove();
     }
@@ -325,11 +326,11 @@ export class HUD {
       v.copy(f.pos);
       v.project(camera);
       const x = (v.x * 0.5 + 0.5) * size.width + f.jitter;
-      const y = (-v.y * 0.5 + 0.5) * size.height - t * 52;
+      const y = (-v.y * 0.5 + 0.5) * size.height - t * HUDCFG.floater.rise;
       f.el.style.transform = `translate(-50%,-50%) translate(${x}px, ${y}px) scale(${
-        1 + (1 - t) * 0.25
+        1 + (1 - t) * HUDCFG.floater.scale
       })`;
-      f.el.style.opacity = String(Math.min(1, f.life * 4));
+      f.el.style.opacity = String(Math.min(1, f.life * HUDCFG.floater.opacityRate));
     }
   }
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WORLD, PALETTE as P, RENDER } from './config.js';
+import { MAP, WORLD, PALETTE as P, RENDER } from './config.js';
 import { add, mat, makeRng } from './utils.js';
 import { createRock, createBush, createHouse, createFence } from './models.js';
 import { Tree } from './Tree.js';
@@ -10,7 +10,7 @@ import { Tree } from './Tree.js';
  * can't walk through tree trunks and boulders.
  */
 export function createWorld(scene, { reserved = [] } = {}) {
-  const rng = makeRng(90210);
+  const rng = makeRng(MAP.seed);
   const root = new THREE.Group();
   scene.add(root);
   const colliders = [];
@@ -20,7 +20,7 @@ export function createWorld(scene, { reserved = [] } = {}) {
   // Deliberately oversized: with the camera pitched this steeply the ground
   // fills the entire frame, so it must never run out before the far plane.
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(400, 400, 1, 1),
+    new THREE.PlaneGeometry(MAP.groundSize, MAP.groundSize, 1, 1),
     mat(P.grass, { flatShading: false })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -28,13 +28,13 @@ export function createWorld(scene, { reserved = [] } = {}) {
   root.add(ground);
 
   // Mown stripes for that stylized, painted look.
-  for (let i = -24; i <= 24; i++) {
+  for (let i = MAP.stripes.from; i <= MAP.stripes.to; i++) {
     const stripe = new THREE.Mesh(
-      new THREE.PlaneGeometry(400, 3.4),
+      new THREE.PlaneGeometry(MAP.groundSize, MAP.stripes.depth),
       mat(i % 2 ? P.grassDark : P.grassLight, { flatShading: false })
     );
     stripe.rotation.x = -Math.PI / 2;
-    stripe.position.set(0, 0.005, i * 6.8);
+    stripe.position.set(0, MAP.stripes.y, i * MAP.stripes.step);
     stripe.receiveShadow = true;
     root.add(stripe);
   }
@@ -51,8 +51,8 @@ export function createWorld(scene, { reserved = [] } = {}) {
   //                                           -> pad base must differ from it too
   // Current stack: ground 0.00, stripes 0.005, pad base 0.03, ring road 0.06,
   // lanes 0.09, pad glow 0.14.
-  const LANE_Y = 0.09;
-  const RING_Y = 0.06;
+  const LANE_Y = MAP.laneY;
+  const RING_Y = MAP.ringY;
 
   const lane = (w, l, x, z, rotY = 0) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), mat(P.dirt, { flatShading: false }));
@@ -66,7 +66,7 @@ export function createWorld(scene, { reserved = [] } = {}) {
 
   // Ring road around the keep.
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(7.6, 10.4, 48),
+    new THREE.RingGeometry(MAP.ring.inner, MAP.ring.outer, MAP.ring.segments),
     mat(P.dirt, { flatShading: false })
   );
   ring.rotation.x = -Math.PI / 2;
@@ -79,16 +79,16 @@ export function createWorld(scene, { reserved = [] } = {}) {
   for (const a of lanes) {
     const dx = Math.sin(a);
     const dz = Math.cos(a);
-    const mid = 20;
-    lane(5.4, 22, dx * mid, dz * mid, -a);
+    const mid = MAP.lane.mid;
+    lane(MAP.lane.width, MAP.lane.length, dx * mid, dz * mid, -a);
   }
 
   // --- Cliff border -------------------------------------------------
   const edge = WORLD.size;
-  for (let i = 0; i < 88; i++) {
-    const a = (i / 88) * Math.PI * 2;
-    const r = edge + 1.5 + rng() * 3;
-    const h = 1.6 + rng() * 2.4;
+  for (let i = 0; i < MAP.cliff.segments; i++) {
+    const a = (i / MAP.cliff.segments) * Math.PI * 2;
+    const r = edge + MAP.cliff.edgePad + rng() * MAP.cliff.radiusSpan;
+    const h = MAP.cliff.height + rng() * MAP.cliff.heightSpan;
     const cliff = new THREE.Mesh(
       new THREE.BoxGeometry(3.4 + rng() * 1.6, h, 3 + rng() * 1.4),
       mat(rng() > 0.6 ? P.sand : P.rock)
@@ -117,23 +117,24 @@ export function createWorld(scene, { reserved = [] } = {}) {
    * @returns {{x:number,z:number}|null}
    */
   const findSpot = (radius) => {
-    for (let attempt = 0; attempt < 24; attempt++) {
-      const x = (rng() - 0.5) * 2 * (edge - 6);
-      const z = (rng() - 0.5) * 2 * (edge - 6);
-      if (Math.hypot(x, z) < 13) continue; // keep the plaza + ring clear
+    const P_ = MAP.placement;
+    for (let attempt = 0; attempt < P_.attempts; attempt++) {
+      const x = (rng() - 0.5) * 2 * (edge - P_.edgeInset);
+      const z = (rng() - 0.5) * 2 * (edge - P_.edgeInset);
+      if (Math.hypot(x, z) < P_.plazaClear) continue; // keep the plaza + ring clear
 
       const nearLane = lanes.some((a) => {
         const dx = Math.sin(a);
         const dz = Math.cos(a);
         // Distance from the point to the lane axis.
         const along = x * dx + z * dz;
-        if (along < 6 || along > 34) return false;
+        if (along < P_.laneBand[0] || along > P_.laneBand[1]) return false;
         const perp = Math.abs(x * dz - z * dx);
-        return perp < 4.5;
+        return perp < P_.perpMax;
       });
       if (nearLane) continue;
-      if (reserved.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + radius + 1.5)) continue;
-      if (props.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + radius + 1.2)) continue;
+      if (reserved.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + radius + P_.reservedPad)) continue;
+      if (props.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + radius + P_.propPad)) continue;
 
       return { x, z };
     }
@@ -148,7 +149,7 @@ export function createWorld(scene, { reserved = [] } = {}) {
     obj.position.set(spot.x, 0, spot.z);
     root.add(obj);
     props.push({ ...spot, r: radius });
-    if (collide) colliders.push({ x: spot.x, z: spot.z, r: radius + 0.25 });
+    if (collide) colliders.push({ x: spot.x, z: spot.z, r: radius + MAP.placement.colliderPad });
     return obj;
   };
 
@@ -157,23 +158,23 @@ export function createWorld(scene, { reserved = [] } = {}) {
   // for wood: they topple, leave a stump, and regrow. Their collision is owned
   // by the Tree itself, so the game can skip felled ones.
   const trees = [];
-  for (let i = 0; i < 30; i++) {
-    const spot = findSpot(0.9);
+  for (let i = 0; i < MAP.props.trees.count; i++) {
+    const spot = findSpot(MAP.props.trees.radius);
     if (!spot) continue;
     trees.push(new Tree(scene, { x: spot.x, z: spot.z, rng }));
-    props.push({ ...spot, r: 0.9 });
+    props.push({ ...spot, r: MAP.props.trees.radius });
   }
 
-  for (let i = 0; i < 14; i++) tryPlace(createRock, 0.8);
-  for (let i = 0; i < 20; i++) tryPlace(createBush, 0.5, { collide: false });
+  for (let i = 0; i < MAP.props.rocks.count; i++) tryPlace(createRock, MAP.props.rocks.radius);
+  for (let i = 0; i < MAP.props.bushes.count; i++) tryPlace(createBush, MAP.props.bushes.radius, { collide: false });
 
   // A couple of lootable-looking hamlets for flavour.
-  tryPlace(() => createHouse(P.roofRed), 2.2);
-  tryPlace(() => createHouse(P.roofBlue), 2.2);
+  tryPlace(() => createHouse(P.roofRed), MAP.props.houses.radius);
+  tryPlace(() => createHouse(P.roofBlue), MAP.props.houses.radius);
 
-  const fence = createFence(7);
+  const fence = createFence(MAP.props.fences.count);
   fence.position.set(0, 0, 0);
-  const f = tryPlace(() => fence, 1.0);
+  const f = tryPlace(() => fence, MAP.props.fences.radius);
   if (f) f.rotation.y = rng() * Math.PI;
 
   return { root, colliders, spawnGates, trees, propCount: props.length };

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TREE, PALETTE as P } from './config.js';
+import { FEEL, TREE, PALETTE as P } from './config.js';
 import { createTree, createStump } from './models.js';
 import { clamp } from './utils.js';
 
@@ -56,7 +56,7 @@ export class Tree {
     this.root.add(this.stumpModel);
 
     /** Collision radius for the hero, ~ the trunk. */
-    this.blockRadius = 0.24 * this.trunkScale + 0.3;
+    this.blockRadius = FEEL.tree.blockScale * this.trunkScale + FEEL.tree.blockPad;
 
     this._buildIndicator();
   }
@@ -64,7 +64,7 @@ export class Tree {
   /** Segmented bar showing how many chops are left. */
   _buildIndicator() {
     this.indicator = new THREE.Group();
-    this.indicator.position.y = 3.4 * this.trunkScale;
+    this.indicator.position.y = FEEL.tree.indicatorY * this.trunkScale;
     this.indicator.visible = false;
     this.root.add(this.indicator);
 
@@ -140,7 +140,7 @@ export class Tree {
 
   /** World position of the trunk mid-height — used for chip particles. */
   chipAnchor(out = new THREE.Vector3()) {
-    return out.set(this.x, 0.8 * this.trunkScale, this.z);
+    return out.set(this.x, FEEL.tree.chipAnchorY * this.trunkScale, this.z);
   }
 
   update(dt, camera) {
@@ -153,7 +153,7 @@ export class Tree {
         if (this.shake > 0) {
           this.shake -= dt;
           const t = clamp(this.shake / TREE.shakeTime, 0, 1);
-          const wobble = Math.sin(this.time * 55) * 0.09 * t;
+          const wobble = Math.sin(this.time * FEEL.tree.chopWobbleRate) * FEEL.tree.chopWobble * t;
           this.pivot.rotation.z = wobble;
           this.pivot.rotation.x = wobble * 0.6;
         } else if (this.pivot.rotation.z !== 0 || this.pivot.rotation.x !== 0) {
@@ -166,7 +166,7 @@ export class Tree {
 
         // Gentle idle sway so the world doesn't feel frozen.
         if (this.foliage) {
-          this.foliage.rotation.z = Math.sin(this.time * 1.1 + this.x) * 0.02;
+          this.foliage.rotation.z = Math.sin(this.time * FEEL.tree.swayRate + this.x) * FEEL.tree.sway;
         }
         break;
       }
@@ -177,8 +177,8 @@ export class Tree {
         // Ease-in topple — slow start, accelerating fall, like real gravity.
         const eased = t * t;
         this.pivot.rotation.y = this.fallYaw;
-        this.pivot.rotation.z = eased * (Math.PI / 2 - 0.12);
-        this.pivot.position.y = -eased * 0.1 * scale;
+        this.pivot.rotation.z = eased * FEEL.tree.fallLean;
+        this.pivot.position.y = -eased * FEEL.tree.fallSink * scale;
 
         if (t >= 1) {
           this.state = 'felled';
@@ -195,7 +195,7 @@ export class Tree {
       case 'felled': {
         this.respawnTimer -= dt;
         // Stump pops away right before the sapling returns.
-        if (this.respawnTimer < 0.6) {
+        if (this.respawnTimer < FEEL.tree.stumpHide) {
           this.stumpModel.visible = false;
         }
         if (this.respawnTimer <= 0) {
@@ -204,18 +204,18 @@ export class Tree {
           this.chopsLeft = this.maxChops;
           this._refreshIndicator();
           this.pivot.visible = true;
-          this.pivot.scale.setScalar(0.15);
+          this.pivot.scale.setScalar(FEEL.tree.regrowStart);
         }
         break;
       }
 
       case 'regrowing': {
         this.growT += dt;
-        const t = clamp(this.growT / 1.1, 0, 1);
+        const t = clamp(this.growT / FEEL.tree.regrowTime, 0, 1);
         // Slight overshoot for a springy pop back into existence.
         const eased = t < 1 ? 1 - Math.pow(1 - t, 3) : 1;
         const overshoot = Math.sin(t * Math.PI) * 0.06;
-        this.pivot.scale.setScalar(0.15 + eased * 0.85 + overshoot);
+        this.pivot.scale.setScalar(FEEL.tree.regrowStart + eased * FEEL.tree.regrowSpan + overshoot);
 
         if (t >= 1) {
           this.pivot.scale.setScalar(1);

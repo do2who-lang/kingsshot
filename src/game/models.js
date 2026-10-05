@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PALETTE as P, WALL } from './config.js';
+import { FEEL, PALETTE as P, PROJECTILE, WALL } from './config.js';
 import { add, mat } from './utils.js';
 
 /* ------------------------------------------------------------------ *
@@ -39,7 +39,7 @@ export function capsule(radius, length, color, opts = {}) {
  * forward, e.g. a nocked arrow) should rotate it by PI themselves.
  */
 export function buildArrow({
-  length = 0.72,
+  length = PROJECTILE.arrowLength,
   shaftColor = 0x8a5a2b,
   headColor = 0x9aa3ad,
   fletchColor = 0xc0392b,
@@ -250,7 +250,7 @@ export function createCharacter({
   // The arrow on the string. Hidden until the hero starts a draw.
   // Pulled toward the archer (+Z) as the string is drawn; reach is small enough
   // that the fully-drawn string stops just short of the torso.
-  const nockedArrow = buildArrow({ length: 0.66 });
+  const nockedArrow = buildArrow({ length: FEEL.hero.nockLength });
   nockedArrow.rotation.y = Math.PI; // point it along -Z
   nockedArrow.position.set(0, 0, BOW_TIP_Z);
   nockedArrow.visible = false;
@@ -711,6 +711,297 @@ export function createArcherTower(level = 1) {
       turretHeight: turretRoot.position.y,
       /** Where to float the health bar: clear of the roof. */
       badgeHeight: apexY + 0.5,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Catapult — a rolling-boulder siege engine
+ *
+ * A heavy timber frame on four wheels: two long skids carrying an A-frame, a
+ * torsion bundle of pale rope across the axle, and a throwing arm with a sling
+ * cup at one end and a counterweight at the other. A pile of stone shot sits
+ * beside it.
+ *
+ * Tiers lengthen the arm, thicken the frame and raise the axle, so an upgraded
+ * catapult reads as a bigger engine rather than a recoloured one.
+ *
+ * The aiming rig mirrors the other structures: a yaw group driven by
+ * `rotation.y = atan2(dx, dz)`, an arm authored along **-Z** (so a positive
+ * `rotation.x` tips the cup *up*), and a muzzle anchor in the cup where the
+ * boulder is released.
+ * ------------------------------------------------------------------ */
+
+export function createCatapult(level = 1) {
+  const root = new THREE.Group();
+  const tier = level - 1;
+
+  /**
+   * The whole engine is built at full size above and scaled down here, so the
+   * proportions stay consistent between tiers and the throwing arm's rest and
+   * release angles can be reasoned about in one place.
+   */
+  root.scale.setScalar(FEEL.catapult.modelScale);
+
+  const AXLE_Y = 1.6 + tier * 0.1;
+  const ARM_LEN = 2.8 + tier * 0.3;
+  /**
+   * Rest pose: arm cocked *low and forward*, cup near the ground, ready to
+   * whip up. A raised rest pose (as an earlier version had) makes the throw
+   * read as a twitch rather than a swing.
+   */
+  const ARM_REST = FEEL.catapult.armRest;
+  /** How far the arm whips up on release; shared with the throw animation. */
+  const ARM_SWING = FEEL.catapult.armSwing;
+
+  // --- Skids (the two long timber bed beams) -----------------------------
+  const SKID_LEN = 3.6 + tier * 0.2;
+  for (const x of [-0.95, 0.95]) {
+    const skid = box(0.26, 0.34, SKID_LEN, P.wood);
+    skid.position.set(x, 0.3, 0);
+    add(root, skid, { receive: true });
+  }
+
+  // Cross braces tie the skids together.
+  for (const z of [-1.2, 0, 1.2]) {
+    const brace = box(2.1, 0.18, 0.24, P.woodDark);
+    brace.position.set(0, 0.34, z);
+    add(root, brace, { receive: true });
+  }
+
+  // --- Wheels -------------------------------------------------------------
+  for (const [x, z] of [[-1.05, 1.15], [1.05, 1.15], [-1.05, -1.15], [1.05, -1.15]]) {
+    const wheel = cyl(0.44, 0.44, 0.18, P.woodDark, 12);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.44, z);
+    add(root, wheel);
+    const hub = cyl(0.1, 0.1, 0.22, P.woodLight, 8);
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(x, 0.44, z);
+    add(root, hub);
+  }
+
+  // --- A-frame uprights carrying the axle --------------------------------
+  for (const x of [-0.85, 0.85]) {
+    for (const lean of [-0.32, 0.32]) {
+      const leg = box(0.2, 1.5, 0.2, P.wood);
+      leg.position.set(x, 0.95, lean * 0.9);
+      leg.rotation.x = lean;
+      add(root, leg);
+    }
+  }
+
+  // Axle across the top of the A-frame.
+  const axle = cyl(0.12, 0.12, 2.0, P.woodDark, 8);
+  axle.rotation.z = Math.PI / 2;
+  axle.position.y = AXLE_Y;
+  add(root, axle);
+
+  // --- Aiming rig ---------------------------------------------------------
+  const turretRoot = new THREE.Group();
+  turretRoot.position.y = AXLE_Y;
+  turretRoot.rotation.y = Math.PI; // +Z convention; see the archer tower.
+  root.add(turretRoot);
+
+  const yaw = new THREE.Group();
+  turretRoot.add(yaw);
+
+  // Pale rope torsion bundle, fixed to the frame (does not swing with the arm).
+  const bundle = cyl(0.24, 0.24, 1.5, P.rope, 10);
+  bundle.rotation.z = Math.PI / 2;
+  add(yaw, bundle);
+
+  // The throwing arm, pivoting at the axle.
+  const arm = new THREE.Group();
+  arm.rotation.x = ARM_REST;
+  yaw.add(arm);
+
+  const beam = box(0.22, 0.22, ARM_LEN, P.wood);
+  beam.position.z = -ARM_LEN / 2;
+  add(arm, beam);
+
+  // Counterweight at the short end.
+  const weight = box(0.66, 0.56, 0.66, P.woodDark);
+  weight.position.set(0, -0.16, 0.62);
+  add(arm, weight);
+  const strap = box(0.7, 0.12, 0.7, P.rope);
+  strap.position.set(0, 0.16, 0.62);
+  add(arm, strap);
+
+  // Sling cup at the long end.
+  const cup = new THREE.Group();
+  cup.position.z = -ARM_LEN;
+  const cupFloor = box(0.62, 0.1, 0.62, P.woodLight);
+  add(cup, cupFloor);
+  for (const [cx, cz] of [[-0.28, 0], [0.28, 0], [0, -0.28], [0, 0.28]]) {
+    const lip = box(0.09, 0.34, 0.09, P.woodDark);
+    lip.position.set(cx, 0.16, cz);
+    add(cup, lip);
+  }
+  arm.add(cup);
+
+  /** Where boulders are released: just above the cup. */
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0.24, 0);
+  cup.add(muzzle);
+
+  // --- Ammunition pile ----------------------------------------------------
+  const balls = 3 + tier;
+  for (let i = 0; i < balls; i++) {
+    const a = 1.2 + i * 1.5;
+    const r = 1.7 + (i % 2) * 0.28;
+    const ball = sphere(0.26, P.towerStoneDark);
+    ball.position.set(Math.cos(a) * r, 0.26, Math.sin(a) * r);
+    add(root, ball, { receive: true });
+  }
+
+  const apexY = AXLE_Y + Math.sin(ARM_REST + ARM_SWING) * ARM_LEN;
+  return {
+    root,
+    parts: {
+      yaw,
+      arm,
+      cup,
+      muzzle,
+      /** Rest angle, so the throw animation kicks off a known pose. */
+      armRest: ARM_REST,
+      /** Swing magnitude, so the bar can clear the arm and the anim can match. */
+      armSwing: ARM_SWING,
+      turretHeight: AXLE_Y,
+      badgeHeight: apexY + 0.7,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Bombard — a stone-throwing mortar
+ *
+ * Where the archer tower is masonry, the bombard is *ordnance*: a fat iron tube
+ * trunnioned onto a timber carriage, sitting on a squat stone platform, with a
+ * pile of stone shot stacked beside it. It lobs shells in a high arc.
+ *
+ * Tiers lengthen and thicken the barrel, raise the platform and add shot to the
+ * pile, so an upgraded bombard reads as visibly heavier artillery.
+ *
+ * The aiming rig mirrors the archer tower's exactly: a yaw group driven by
+ * `rotation.y = atan2(dx, dz)`, a barrel authored along **-Z** (so a positive
+ * `rotation.x` pitches the muzzle *up*), and a muzzle anchor at the bore.
+ * ------------------------------------------------------------------ */
+
+export function createBombard(level = 1) {
+  const root = new THREE.Group();
+  const tier = level - 1;
+
+  /** Barrel elevation above the horizontal — a mortar, so a steep lob. */
+  const ELEV = 0.92 + tier * 0.045;
+  const BARREL_LEN = 1.7 + tier * 0.24;
+  const BARREL_R = 0.27 + tier * 0.02;
+
+  // --- Stone platform ----------------------------------------------------
+  const plinthH = 0.4 + tier * 0.05;
+  const plinth = cyl(1.45, 1.6, plinthH, P.towerStoneDark, 10);
+  plinth.position.y = plinthH / 2;
+  add(root, plinth, { receive: true });
+
+  const deck = cyl(1.34, 1.45, 0.12, P.towerStoneLight, 10);
+  deck.position.y = plinthH + 0.06;
+  add(root, deck, { receive: true });
+
+  // --- Timber carriage ---------------------------------------------------
+  const carriage = new THREE.Group();
+  carriage.position.y = plinthH + 0.12;
+
+  const bed = box(1.5, 0.22, 1.0, P.wood);
+  bed.position.y = 0.11;
+  add(carriage, bed);
+
+  for (const x of [-0.64, 0.64]) {
+    const cheek = box(0.2, 0.6, 0.92, P.woodDark);
+    cheek.position.set(x, 0.42, 0);
+    add(carriage, cheek);
+    // Iron straps binding the timber cheeks.
+    const strap = box(0.24, 0.14, 0.96, P.bombardIron);
+    strap.position.set(x, 0.66, 0);
+    add(carriage, strap);
+  }
+
+  // Cross axle the barrel trunnions ride on.
+  const axle = cyl(0.08, 0.08, 1.72, P.woodDark, 8);
+  axle.rotation.z = Math.PI / 2;
+  axle.position.y = 0.7;
+  add(carriage, axle);
+
+  root.add(carriage);
+
+  // --- Aiming rig --------------------------------------------------------
+  const turretRoot = new THREE.Group();
+  turretRoot.position.y = plinthH + 0.12 + 0.7;
+  turretRoot.rotation.y = Math.PI; // +Z convention; see the archer tower above.
+  root.add(turretRoot);
+
+  const yaw = new THREE.Group();
+  turretRoot.add(yaw);
+
+  // Barrel pivot: authored along -Z, tilted up by ELEV.
+  const barrelPivot = new THREE.Group();
+  barrelPivot.rotation.x = ELEV;
+  yaw.add(barrelPivot);
+
+  // Iron tube, flared at the bore (that end sits on -Z after the rotation).
+  const barrel = cyl(BARREL_R, BARREL_R * 1.14, BARREL_LEN, P.bombardIron, 12);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.z = -BARREL_LEN / 2;
+  add(barrelPivot, barrel);
+
+  // Reinforcing bands down the barrel.
+  for (const f of [0.2, 0.52, 0.84]) {
+    const band = cyl(BARREL_R * 1.22, BARREL_R * 1.22, 0.12, P.bombardIronDark, 12);
+    band.rotation.x = Math.PI / 2;
+    band.position.z = -BARREL_LEN * f;
+    add(barrelPivot, band);
+  }
+
+  // Muzzle lip and the black bore.
+  const lip = cyl(BARREL_R * 1.34, BARREL_R * 1.34, 0.14, P.bombardIronDark, 12);
+  lip.rotation.x = Math.PI / 2;
+  lip.position.z = -BARREL_LEN;
+  add(barrelPivot, lip);
+
+  const bore = cyl(BARREL_R * 0.84, BARREL_R * 0.84, 0.07, P.recess, 12);
+  bore.rotation.x = Math.PI / 2;
+  bore.position.z = -BARREL_LEN - 0.03;
+  add(barrelPivot, bore, { cast: false });
+
+  /** Where shells emerge — just outside the bore. */
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, -BARREL_LEN - 0.16);
+  barrelPivot.add(muzzle);
+
+  // --- Ammunition pile ---------------------------------------------------
+  // More shot stacked on the deck with every tier.
+  const balls = 4 + tier * 2;
+  for (let i = 0; i < balls; i++) {
+    const a = 0.4 + i * 1.9;
+    const r = 0.78 + (i % 2) * 0.22;
+    const ball = sphere(0.15, P.bombardIronDark);
+    ball.position.set(
+      Math.cos(a) * r,
+      plinthH + 0.12 + 0.15,
+      Math.sin(a) * r
+    );
+    add(root, ball, { receive: true });
+  }
+
+  const apexY = turretRoot.position.y + Math.sin(ELEV) * BARREL_LEN;
+
+  return {
+    root,
+    parts: {
+      yaw,
+      barrelPivot,
+      muzzle,
+      turretHeight: turretRoot.position.y,
+      badgeHeight: apexY + 0.6,
     },
   };
 }

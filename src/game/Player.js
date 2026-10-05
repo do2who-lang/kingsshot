@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HERO, WORLD, PALETTE as P } from './config.js';
+import { FEEL, FX, HERO, WORLD, PALETTE as P } from './config.js';
 import { createCharacter } from './models.js';
 import { clamp, damp, randRange } from './utils.js';
 
@@ -10,7 +10,7 @@ import { clamp, damp, randRange } from './utils.js';
  * frames him from the front with the keep rising behind him. `facing` uses the
  * usual `atan2(dx, dz)` yaw convention: 0 points along +Z, away from the keep.
  */
-export const HERO_SPAWN = { x: 0, z: 6, facing: 0 };
+export const HERO_SPAWN = FEEL.hero.spawn;
 
 /**
  * The hero: a coin-hungry archer who walks where you point him and
@@ -85,7 +85,7 @@ export class Player {
   takeDamage(amount, fromPosition) {
     if (this.dead) return;
     this.health = Math.max(0, this.health - amount);
-    this.hitFlash = 0.16;
+    this.hitFlash = FEEL.hero.hitFlash;
     this.timeSinceDamage = 0;
     this.sfx?.heroHurt();
 
@@ -93,8 +93,8 @@ export class Player {
       const dx = this.root.position.x - fromPosition.x;
       const dz = this.root.position.z - fromPosition.z;
       const d = Math.hypot(dx, dz) || 1;
-      this.velocityKick.x += (dx / d) * 5;
-      this.velocityKick.z += (dz / d) * 5;
+      this.velocityKick.x += (dx / d) * FEEL.hero.knockback;
+      this.velocityKick.z += (dz / d) * FEEL.hero.knockback;
     }
 
     if (this.health <= 0) this.dead = true;
@@ -125,7 +125,7 @@ export class Player {
       const diff = Math.abs(
         (((angle - facing + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI
       );
-      const score = dist + (diff > assist ? 30 : 0) + diff * 2.2;
+      const score = dist + (diff > assist ? FEEL.hero.targetFrontBonus : 0) + diff * FEEL.hero.targetConeWeight;
       if (score < bestScore) {
         bestScore = score;
         best = e;
@@ -171,9 +171,9 @@ export class Player {
     const mx = ctx.move.x;
     const mz = ctx.move.z;
     const mag = Math.min(1, Math.hypot(mx, mz));
-    this.currentSpeed = damp(this.currentSpeed, mag * this.moveSpeed, 12, dt);
+    this.currentSpeed = damp(this.currentSpeed, mag * this.moveSpeed, FEEL.hero.moveDamp, dt);
 
-    if (mag > 0.05) {
+    if (mag > FEEL.hero.moveDeadzone) {
       const nx = mx / (Math.hypot(mx, mz) || 1);
       const nz = mz / (Math.hypot(mx, mz) || 1);
       this.root.position.x += nx * this.currentSpeed * dt;
@@ -183,36 +183,36 @@ export class Player {
     // Knock-back impulse decays quickly.
     this.root.position.x += this.velocityKick.x * dt;
     this.root.position.z += this.velocityKick.z * dt;
-    this.velocityKick.x = damp(this.velocityKick.x, 0, 9, dt);
-    this.velocityKick.z = damp(this.velocityKick.z, 0, 9, dt);
+    this.velocityKick.x = damp(this.velocityKick.x, 0, FEEL.hero.knockbackDecay, dt);
+    this.velocityKick.z = damp(this.velocityKick.z, 0, FEEL.hero.knockbackDecay, dt);
 
     ctx.collide?.(this.root.position);
 
     // --- Walk animation ---
-    const moving = this.currentSpeed > 0.35;
+    const moving = this.currentSpeed > FEEL.hero.movingThreshold;
     if (moving) {
-      this.walkPhase += dt * (7 + this.currentSpeed * 1.1);
-      const swing = Math.sin(this.walkPhase) * 0.5;
+      this.walkPhase += dt * (FEEL.hero.walk.rate + this.currentSpeed * FEEL.hero.walk.speedFactor);
+      const swing = Math.sin(this.walkPhase) * FEEL.hero.walk.swing;
       legL.rotation.x = swing;
       legR.rotation.x = -swing;
-      bob.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.06;
-      bob.rotation.z = Math.sin(this.walkPhase) * 0.045;
+      bob.position.y = Math.abs(Math.sin(this.walkPhase)) * FEEL.hero.walk.bob;
+      bob.rotation.z = Math.sin(this.walkPhase) * FEEL.hero.walk.bobRot;
     } else {
       this.walkPhase = 0;
-      legL.rotation.x = damp(legL.rotation.x, 0, 10, dt);
-      legR.rotation.x = damp(legR.rotation.x, 0, 10, dt);
-      bob.position.y = damp(bob.position.y, Math.sin(performance.now() / 600) * 0.02, 6, dt);
-      bob.rotation.z = damp(bob.rotation.z, 0, 8, dt);
+      legL.rotation.x = damp(legL.rotation.x, 0, FEEL.hero.legLerp, dt);
+      legR.rotation.x = damp(legR.rotation.x, 0, FEEL.hero.legLerp, dt);
+      bob.position.y = damp(bob.position.y, Math.sin(performance.now() / FEEL.hero.idleBobRate) * FEEL.hero.idleBob, FEEL.hero.idleBobLerp, dt);
+      bob.rotation.z = damp(bob.rotation.z, 0, FEEL.hero.bobRotLerp, dt);
     }
 
     // Footstep dust puffs.
     if (moving) {
       this.stepTimer -= dt * this.currentSpeed;
       if (this.stepTimer <= 0) {
-        this.stepTimer = 0.55;
+        this.stepTimer = FEEL.hero.footstepInterval;
         this.effects.burst(
           new THREE.Vector3(this.root.position.x, 0.15, this.root.position.z),
-          { count: 2, color: 0xd8cba8, speed: 1.4, size: 0.14, life: 0.4, gravity: 4 }
+          FX.footstep
         );
       }
     }
@@ -220,7 +220,7 @@ export class Player {
     // --- Targeting ---
     this.targetTimer -= dt;
     if (this.targetTimer <= 0 || !this.target || !this.target.alive) {
-      this.targetTimer = 0.15;
+      this.targetTimer = FEEL.hero.retarget;
       this._acquireTarget(ctx.enemies);
     }
 
@@ -234,10 +234,10 @@ export class Player {
         t.root.position.x - this.root.position.x,
         t.root.position.z - this.root.position.z
       );
-    } else if (mag > 0.05) {
+    } else if (mag > FEEL.hero.moveDeadzone) {
       desiredFacing = Math.atan2(mx, mz);
     }
-    this.facing = dampAngle(this.facing, desiredFacing, 11, dt);
+    this.facing = dampAngle(this.facing, desiredFacing, FEEL.hero.facingLerp, dt);
     this.root.rotation.y = this.facing;
 
     // --- Aim + fire ---
@@ -249,7 +249,7 @@ export class Player {
       ) / HERO.weapon.arrowSpeed;
       this._predicted.set(
         t.root.position.x + t._lastVelocity.x * travel,
-        t.root.position.y + t.headHeight * 0.8,
+        t.root.position.y + t.headHeight * FEEL.hero.leadHeight,
         t.root.position.z + t._lastVelocity.z * travel
       );
 
@@ -258,12 +258,12 @@ export class Player {
       const distXZ = Math.hypot(dx, dz);
       const desiredAim = Math.atan2(dx, dz);
 
-      this.aimYaw = dampAngle(this.aimYaw, desiredAim, 16, dt);
+      this.aimYaw = dampAngle(this.aimYaw, desiredAim, FEEL.hero.aimLerp, dt);
       // The barrel is authored along -Z, so a positive pitch tilts it upward.
       const pitch = clamp(
-        Math.atan2(this._predicted.y - 1.05, Math.max(0.001, distXZ)),
-        -0.9,
-        0.5
+        Math.atan2(this._predicted.y + FEEL.hero.aimAnchorY, Math.max(0.001, distXZ)),
+        FEEL.hero.pitchClamp[0],
+        FEEL.hero.pitchClamp[1]
       );
 
       // aimPivot sits inside a root that already has `facing`, so subtract it.
@@ -276,14 +276,14 @@ export class Player {
         this._fire();
       }
     } else {
-      aimPivot.rotation.y = dampAngle(aimPivot.rotation.y, 0, 8, dt);
-      aimPivot.rotation.x = damp(aimPivot.rotation.x, -0.12, 6, dt);
-      this.cooldown = Math.min(this.cooldown, 0.12);
+      aimPivot.rotation.y = dampAngle(aimPivot.rotation.y, 0, FEEL.hero.idleAimLerp, dt);
+      aimPivot.rotation.x = damp(aimPivot.rotation.x, FEEL.hero.idlePitch, FEEL.hero.idlePitchLerp, dt);
+      this.cooldown = Math.min(this.cooldown, FEEL.hero.idleCooldown);
     }
 
-    this.recoil = Math.max(0, this.recoil - dt * 9);
-    bow.position.z = -0.58 + this.recoil * 0.16;
-    aimPivot.rotation.x += this.recoil * 0.09;
+    this.recoil = Math.max(0, this.recoil - dt * FEEL.hero.recoilDecay);
+    bow.position.z = FEEL.hero.bowRestZ + this.recoil * FEEL.hero.recoilZ;
+    aimPivot.rotation.x += this.recoil * FEEL.hero.recoilPitch;
 
     /*
      * The draw is derived from the reload timer, so loosing an arrow resets
@@ -310,11 +310,11 @@ export class Player {
      * Kept deliberately short: the string now correctly sits on the archer's
      * side of the grip, so a long pull would drag it inside the hero's chest.
      */
-    const DRAW_REACH = 0.14;
+    const DRAW_REACH = FEEL.hero.drawReach;
 
     const draw = clamp(this.charge, 0, 1);
 
-    nockedArrow.visible = draw > 0.02;
+    nockedArrow.visible = draw > FEEL.hero.drawVisible;
 
     // Everything moves in +Z (toward the archer) as the bow is drawn, which is
     // what makes the tips sit *behind* the grip at rest.
@@ -351,7 +351,7 @@ export class Player {
       direction: dir,
       speed: HERO.weapon.arrowSpeed,
       damage: HERO.weapon.damage,
-      range: this.range + 8,
+      range: this.range + FEEL.hero.rangePad,
       team: 'hero',
     });
 

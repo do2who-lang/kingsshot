@@ -1,9 +1,10 @@
 import * as THREE from 'three';
+import { AI } from './config.js';
 import { createEnemyModel } from './models.js';
 import { randRange, clamp, damp } from './utils.js';
 
-const HIT_FLASH_TIME = 0.12;
-const DEATH_TIME = 0.6;
+const HIT_FLASH_TIME = AI.hitFlashTime;
+const DEATH_TIME = AI.deathTime;
 
 /**
  * One enemy. Three archetypes share this class; behaviour differences come
@@ -31,7 +32,7 @@ export class Enemy {
     this.deathTimer = 0;
     this.hitFlash = 0;
 
-    this.attackCooldown = randRange(0, 0.4);
+    this.attackCooldown = randRange(0, AI.attackStagger);
     this.attackAnim = 0;
     this.walkPhase = Math.random() * Math.PI * 2;
 
@@ -41,12 +42,12 @@ export class Enemy {
     this.root.position.copy(opts.position ?? new THREE.Vector3());
     this.root.rotation.y = Math.random() * Math.PI * 2;
 
-    this.hitRadius = 0.65 * type.scale;
-    this.headHeight = 1.15 * type.scale;
+    this.hitRadius = AI.hitRadiusScale * type.scale;
+    this.headHeight = AI.headHeightScale * type.scale;
 
     // Enemies must not stack on one pixel at the gate — fan them out.
-    this.laneOffsetAngle = randRange(-0.45, 0.45);
-    this.laneOffsetRadius = randRange(-1.6, 1.6);
+    this.laneOffsetAngle = randRange(-AI.laneAngle, AI.laneAngle);
+    this.laneOffsetRadius = randRange(-AI.laneRadius, AI.laneRadius);
 
     this._center = new THREE.Vector3();
     this._desired = new THREE.Vector3();
@@ -67,7 +68,7 @@ export class Enemy {
     scene.add(this.root);
 
     this.healthBar = createHealthBar();
-    this.healthBar.position.y = this.headHeight + 0.75;
+    this.healthBar.position.y = this.headHeight + AI.healthBarOffset;
     this.healthBarFill = this.healthBar.userData.fill;
     this.root.add(this.healthBar);
   }
@@ -76,7 +77,7 @@ export class Enemy {
   centerWorld(out = this._center) {
     return out.set(
       this.root.position.x,
-      this.root.position.y + this.headHeight * 0.78,
+      this.root.position.y + this.headHeight * AI.hitCentreFactor,
       this.root.position.z
     );
   }
@@ -86,8 +87,8 @@ export class Enemy {
     const keepPos = this.keep.root.position;
     if (this.laneOffsetAngle === 0) return out.copy(keepPos);
     // Offset around the keep so the horde spreads into an arc.
-    const a = this.laneOffsetAngle * 2.2;
-    const r = this.keep.attackRadius + 0.4 + this.laneOffsetRadius * 0.6;
+    const a = this.laneOffsetAngle * AI.formationAngle;
+    const r = this.keep.attackRadius + AI.formationRadiusPad + this.laneOffsetRadius * AI.formationTighten;
     return out.set(
       keepPos.x + Math.sin(a) * r,
       0,
@@ -179,7 +180,7 @@ export class Enemy {
       : Infinity;
     const keepDist = Math.hypot(keepPos.x - pos.x, keepPos.z - pos.z);
 
-    const siegeStop = (tw) => this.type.attackRange * 0.7 + tw.blockRadius;
+    const siegeStop = (tw) => this.type.attackRange * AI.siegeStopFactor + tw.blockRadius;
     /**
      * How far off a tower's doorstep an enemy will notice it.
      *
@@ -190,7 +191,7 @@ export class Enemy {
      * This value lands in between, so roughly the inner half of a wave peels off
      * to besiege and the rest presses on to the keep.
      */
-    const siegeReach = 5.5;
+    const siegeReach = AI.siegeReach;
     const siegeDetect = (tw) => siegeStop(tw) + siegeReach;
 
     let tower = null;
@@ -202,7 +203,7 @@ export class Enemy {
       const committed = this._siegeTower;
       if (committed && committed.alive) {
         const d = Math.hypot(committed.root.position.x - pos.x, committed.root.position.z - pos.z);
-        if (d < siegeDetect(committed) + 2.5) {
+        if (d < siegeDetect(committed) + AI.commitSlack) {
           tower = committed;
           towerDist = d;
         }
@@ -221,7 +222,7 @@ export class Enemy {
     }
     this._siegeTower = tower;
 
-    const aggroHero = !tower && heroDist < 5.5 && heroDist < keepDist;
+    const aggroHero = !tower && heroDist < AI.aggroHeroRange && heroDist < keepDist;
 
     let targetPos;
     let inRange;
@@ -233,11 +234,11 @@ export class Enemy {
       onAttack = () => ctx.onAttackTower?.(this, this.damage, tower);
     } else if (aggroHero) {
       targetPos = heroPos;
-      inRange = heroDist <= this.type.attackRange + 0.8;
+      inRange = heroDist <= this.type.attackRange + AI.heroRangePad;
       onAttack = () => ctx.onAttackHero?.(this, this.damage);
     } else {
       targetPos = keepPos;
-      inRange = keepDist <= this.keep.attackRadius + 0.6;
+      inRange = keepDist <= this.keep.attackRadius + AI.keepRangePad;
       onAttack = () => ctx.onAttackKeep?.(this, this.damage);
     }
 
@@ -254,7 +255,7 @@ export class Enemy {
       let vz = (dz / d) * this.speed;
 
       // Separation: keep the horde loose instead of a single conga line.
-      const sepRadius = 1.05 * this.type.scale;
+      const sepRadius = AI.separationRadius * this.type.scale;
       for (const other of ctx.enemies) {
         if (other === this || !other.alive) continue;
         const ox = pos.x - other.root.position.x;
@@ -262,7 +263,7 @@ export class Enemy {
         const od2 = ox * ox + oz * oz;
         if (od2 > 1e-4 && od2 < sepRadius * sepRadius) {
           const od = Math.sqrt(od2);
-          const push = (1 - od / sepRadius) * this.speed * 1.6;
+          const push = (1 - od / sepRadius) * this.speed * AI.separationPush;
           vx += (ox / od) * push;
           vz += (oz / od) * push;
         }
@@ -314,7 +315,7 @@ export class Enemy {
     }
 
     // Keep them inside the map, just in case.
-    const limit = 42;
+    const limit = AI.mapLimit;
     pos.x = clamp(pos.x, -limit, limit);
     pos.z = clamp(pos.z, -limit, limit);
 
@@ -327,7 +328,7 @@ export class Enemy {
         this.healthBarFill.scale.x = Math.max(0.001, hp);
         this.healthBarFill.position.x = -(1 - hp) * 0.5;
         this.healthBarFill.material.color.setHex(
-          hp > 0.6 ? 0x5fd35f : hp > 0.3 ? 0xf5c518 : 0xe8452f
+          hp > AI.barGood ? 0x5fd35f : hp > AI.barWarn ? 0xf5c518 : 0xe8452f
         );
       }
     }

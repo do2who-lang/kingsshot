@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PALETTE as P } from './config.js';
+import { FX } from './config.js';
 
 /**
  * Transient visuals: muzzle flashes, impact sparks, death puffs, keep rubble
@@ -11,9 +11,9 @@ export class Effects {
     this.items = [];
     this.pool = { spark: [], flash: [] };
 
-    this.sparkGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+    this.sparkGeo = new THREE.BoxGeometry(FX.geo.spark, FX.geo.spark, FX.geo.spark);
     this.sparkMat = new THREE.MeshBasicMaterial({ color: 0xffd166 });
-    this.flashGeo = new THREE.SphereGeometry(0.16, 6, 5);
+    this.flashGeo = new THREE.SphereGeometry(FX.geo.flashSphere, 6, 5);
     this.flashMat = new THREE.MeshBasicMaterial({
       color: 0xffe9a3,
       transparent: true,
@@ -25,7 +25,7 @@ export class Effects {
       depthWrite: false,
     });
 
-    this.burstGeo = new THREE.TetrahedronGeometry(0.22, 0);
+    this.burstGeo = new THREE.TetrahedronGeometry(FX.geo.burst, 0);
   }
 
   _getSpark() {
@@ -34,17 +34,17 @@ export class Effects {
 
   /** Fast, physics-less particles: give them a velocity and a lifetime. */
   burst(position, {
-    count = 8,
-    color = P.blood,
-    speed = 4,
-    size = 0.22,
-    life = 0.5,
-    gravity = 14,
-    spread = 1,
+    count = FX.burst.count,
+    color = FX.burst.color,
+    speed = FX.burst.speed,
+    size = FX.burst.size,
+    life = FX.burst.life,
+    gravity = FX.burst.gravity,
+    spread = FX.burst.spread,
   } = {}) {
     // Hard ceiling so a chaotic wave can never tank the frame rate.
-    if (this.items.length > 320) return;
-    if (this.items.length > 220) count = Math.max(2, Math.round(count * 0.4));
+    if (this.items.length > FX.maxItems) return;
+    if (this.items.length > FX.throttleAt) count = Math.max(2, Math.round(count * FX.throttleScale));
 
     for (let i = 0; i < count; i++) {
       const mesh = new THREE.Mesh(this.burstGeo, new THREE.MeshStandardMaterial({
@@ -52,7 +52,7 @@ export class Effects {
         flatShading: true,
         roughness: 0.9,
       }));
-      mesh.scale.setScalar((size / 0.22) * (0.6 + Math.random() * 0.8));
+      mesh.scale.setScalar((size / FX.geo.burst) * (FX.sizeJitter[0] + Math.random() * FX.sizeJitter[1]));
       mesh.position.copy(position);
       mesh.castShadow = false;
       this.scene.add(mesh);
@@ -66,13 +66,13 @@ export class Effects {
       this.items.push({
         type: 'burst',
         mesh,
-        vel: dir.multiplyScalar(speed * (0.5 + Math.random() * 0.7)),
+        vel: dir.multiplyScalar(speed * (FX.speedJitter[0] + Math.random() * FX.speedJitter[1])),
         spin: new THREE.Vector3(
-          (Math.random() - 0.5) * 14 * spread,
-          (Math.random() - 0.5) * 14 * spread,
-          (Math.random() - 0.5) * 14 * spread
+          (Math.random() - 0.5) * FX.spin * spread,
+          (Math.random() - 0.5) * FX.spin * spread,
+          (Math.random() - 0.5) * FX.spin * spread
         ),
-        life: life * (0.7 + Math.random() * 0.6),
+        life: life * (FX.lifeJitter[0] + Math.random() * FX.lifeJitter[1]),
         maxLife: life,
         gravity,
       });
@@ -86,16 +86,16 @@ export class Effects {
   stringSnap(worldPos, scale = 1) {
     const mesh = new THREE.Mesh(this.flashGeo, this.snapMat.clone());
     mesh.position.copy(worldPos);
-    mesh.scale.setScalar(scale * 0.55);
+    mesh.scale.setScalar(scale * FX.stringSnap.scale);
     this.scene.add(mesh);
-    this.items.push({ type: 'flash', mesh, life: 0.09, maxLife: 0.09, scale: scale * 0.55 });
+    this.items.push({ type: 'flash', mesh, life: FX.stringSnap.life, maxLife: FX.stringSnap.life, scale: scale * FX.stringSnap.scale });
   }
 
-  sparks(worldPos, count = 4) {
+  sparks(worldPos, count = FX.sparks.count) {
     for (let i = 0; i < count; i++) {
       const mesh = this._getSpark();
       mesh.position.copy(worldPos);
-      const s = 0.6 + Math.random() * 0.9;
+      const s = FX.sparks.scale[0] + Math.random() * FX.sparks.scale[1];
       mesh.scale.setScalar(s);
       this.scene.add(mesh);
       this.items.push({
@@ -103,14 +103,14 @@ export class Effects {
         mesh,
         pooled: 'spark',
         vel: new THREE.Vector3(
-          (Math.random() - 0.5) * 6,
-          Math.random() * 4 + 1,
-          (Math.random() - 0.5) * 6
+          (Math.random() - 0.5) * FX.sparks.spreadXZ,
+          Math.random() * FX.sparks.upRange + FX.sparks.upBase,
+          (Math.random() - 0.5) * FX.sparks.spreadXZ
         ),
         spin: new THREE.Vector3(0, 0, 0),
-        life: 0.25,
-        maxLife: 0.25,
-        gravity: 20,
+        life: FX.sparks.life,
+        maxLife: FX.sparks.life,
+        gravity: FX.sparks.gravity,
       });
     }
   }
@@ -133,16 +133,16 @@ export class Effects {
         it.mesh.position.addScaledVector(it.vel, dt);
         if (it.mesh.position.y < 0.05) {
           it.mesh.position.y = 0.05;
-          it.vel.y *= -0.35;
-          it.vel.x *= 0.7;
-          it.vel.z *= 0.7;
+          it.vel.y *= FX.bounce.y;
+          it.vel.x *= FX.bounce.xz;
+          it.vel.z *= FX.bounce.xz;
         }
         it.mesh.rotation.x += it.spin.x * dt;
         it.mesh.rotation.y += it.spin.y * dt;
         it.mesh.rotation.z += it.spin.z * dt;
       } else if (it.type === 'flash') {
         const t = it.life / it.maxLife;
-        it.mesh.scale.setScalar(it.scale * (0.5 + t * 1.1));
+        it.mesh.scale.setScalar(it.scale * (FX.flashExpand[0] + t * FX.flashExpand[1]));
         it.mesh.material.opacity = t;
       }
     }

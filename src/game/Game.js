@@ -1,17 +1,26 @@
 import * as THREE from 'three';
 import {
+  BOMBARD,
   BUILD,
   CAMERA,
+  CATAPULT,
+  CINE,
+  COINS,
+  ECONOMY,
+  FEEL,
+  FX,
   HERO,
   KEEP,
-  PALETTE as P,
+  MAP,
   QUARRY,
   RENDER,
   REPAIR,
+  SPAWN,
   STONE,
   TOWER,
   TREE,
   WALL,
+  WOOD,
   WORLD,
 } from './config.js';
 import { createWorld } from './World.js';
@@ -29,7 +38,9 @@ import { HUD } from './HUD.js';
 import { Sfx } from './Sfx.js';
 import { clamp, damp } from './utils.js';
 /** The hero cannot walk inside this radius — that's the keep's plaza wall. */
-const KEEP_BLOCK_RADIUS = 5.3;
+const KEEP_BLOCK_RADIUS = FEEL.keep.blockRadius;
+/** World origin, where the keep stands — used to aim the shadows at the ruin. */
+const _KEEP_CENTRE = new THREE.Vector3(0, 0, 0);
 
 export class Game {
   constructor(canvas) {
@@ -38,9 +49,9 @@ export class Game {
     this.sfx = new Sfx();
 
     this.state = 'menu'; // menu | playing | over
-    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, quarries: 0, walls: 0, repairs: 0 };
-    this.purse = 0;
-    this.wood = 0;
+    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, bombards: 0, catapults: 0, quarries: 0, walls: 0, repairs: 0 };
+    this.purse = COINS.starting;
+    this.wood = WOOD.starting;
     this.stone = STONE.starting;
 
     this._initRenderer();
@@ -66,6 +77,7 @@ export class Game {
     this._followPose = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
     this._camScratch = new THREE.Vector3();
     this.intro = null;
+    this.defeat = null;
 
     this._bindUi();
 
@@ -74,7 +86,7 @@ export class Game {
     this.resize();
 
     // Give the menu a nice idle camera framing.
-    this.camera.position.set(14, 26, 30);
+    this.camera.position.set(CINE.menu.start.x, CINE.menu.start.y, CINE.menu.start.z);
     this.camera.lookAt(0, 2, 0);
 
     this._lastTime = 0;
@@ -110,26 +122,31 @@ export class Game {
     );
 
     // Soft sky/ground bounce for that flat, cheerful cartoon shading.
-    this.hemi = new THREE.HemisphereLight(0xcfeaff, 0x6f9c4a, 1.15);
+    this.hemi = new THREE.HemisphereLight(0xcfeaff, 0x6f9c4a, CINE.lights.hemi);
     this.scene.add(this.hemi);
 
-    this.sun = new THREE.DirectionalLight(0xfff4dd, 2.0);
+    this.sun = new THREE.DirectionalLight(0xfff4dd, CINE.lights.sun);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(RENDER.shadowMapSize, RENDER.shadowMapSize);
-    const d = 26;
+    const S = CINE.lights.sunShadow;
+    const d = S.extent;
     this.sun.shadow.camera.left = -d;
     this.sun.shadow.camera.right = d;
     this.sun.shadow.camera.top = d;
     this.sun.shadow.camera.bottom = -d;
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 120;
-    this.sun.shadow.bias = -0.0007;
-    this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.camera.near = S.near;
+    this.sun.shadow.camera.far = S.far;
+    this.sun.shadow.bias = S.bias;
+    this.sun.shadow.normalBias = S.normalBias;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
-    this.sunOffset = new THREE.Vector3(17, 36, 15);
+    this.sunOffset = new THREE.Vector3(
+      CINE.lights.sunOffset.x,
+      CINE.lights.sunOffset.y,
+      CINE.lights.sunOffset.z
+    );
 
-    this.fill = new THREE.DirectionalLight(0xbcd7ff, 0.35);
+    this.fill = new THREE.DirectionalLight(0xbcd7ff, CINE.lights.fill);
     this.fill.position.set(-20, 18, -16);
     this.scene.add(this.fill);
   }
@@ -138,7 +155,7 @@ export class Game {
     // The keep plaza is the only reserved ground now: structures are placed
     // freely by the player, so scenery simply has to avoid the plaza.
     this.world = createWorld(this.scene, {
-      reserved: [{ x: 0, z: 0, r: 8 }],
+      reserved: [{ x: 0, z: 0, r: MAP.plazaReserve }],
     });
 
     this.keep = new Keep(this.scene, { sfx: this.sfx, effects: null });
@@ -161,6 +178,8 @@ export class Game {
     // Structures must exist before anything reads the build menu: pricing
     // depends on how many already stand.
     this.towers = [];
+    this.bombards = [];
+    this.catapults = [];
     this.quarries = [];
     /** Wall pieces, keyed by "i,j" grid cell so neighbours are O(1) lookups. */
     this.walls = new Map();
@@ -187,7 +206,7 @@ export class Game {
         this.hud.callout(
           `WAVE ${n}`,
           `${total} enemies • ${cfg.pool.join(' · ')}`,
-          2.0
+          SPAWN.waveStartCallout
         );
       },
       onWaveCleared: (n) => {
@@ -195,14 +214,16 @@ export class Game {
         this.sfx.waveClear();
         this.hud.callout('WAVE CLEARED', 'Loot the field, then brace', 1.8, 'good');
         // Clear-wave bonus so the player can afford the next tower.
-        this._addCoins(10 + n * 3, new THREE.Vector3(0, 6.5, 0), { silent: true });
+        const bonus = ECONOMY.waveClearCoins;
+        this._addCoins(bonus.base + n * bonus.perWave, new THREE.Vector3(0, 6.5, 0), { silent: true });
         // And a little wood, so a keep that got chewed up has an answer.
-        this._addWood(n < 3 ? 0 : 1, new THREE.Vector3(0, 7.2, 0));
-        this.keep.repair(4);
+        const wood = ECONOMY.waveClearWood;
+        this._addWood(n < wood.fromWave ? 0 : wood.amount, new THREE.Vector3(0, 7.2, 0));
+        this.keep.repair(ECONOMY.waveClearRepair);
       },
       onCountdown: (seconds) => {
-        if (seconds > 0 && seconds <= 3) {
-          this.hud.callout(`WAVE ${this.waves.waveNumber}`, `in ${seconds}…`, 0.9, 'warn');
+        if (seconds > 0 && seconds <= SPAWN.countdownFrom) {
+          this.hud.callout(`WAVE ${this.waves.waveNumber}`, `in ${seconds}…`, SPAWN.countdownCallout, 'warn');
         }
       },
     });
@@ -238,18 +259,18 @@ export class Game {
     this.cancelPlacement();
     this.buildOpen = false;
     this.hud.setBuildMenuOpen(false);
-    this.purse = 0;
-    this.wood = 0;
+    this.purse = COINS.starting;
+    this.wood = WOOD.starting;
     this.stone = STONE.starting;
     this.player.reset();
-    this.waves.start(10);
-    this.hud.setCoins(0);
-    this.hud.setWood(0);
+    this.waves.start(SPAWN.firstPrep);
+    this.hud.setCoins(this.purse);
+    this.hud.setWood(this.wood);
     this.hud.setStone(this.stone);
     this._refreshBuildMenu();
     this._lastTime = performance.now();
     this._beginIntro();
-    this.hud.callout('DEFEND THE KEEP', 'Wave 1 incoming', 2.2);
+    this.hud.callout('DEFEND THE KEEP', 'Wave 1 incoming', SPAWN.introCallout);
   }
 
   restart() {
@@ -263,6 +284,12 @@ export class Game {
 
     for (const t of this.towers) t.dispose();
     this.towers.length = 0;
+
+    for (const b of this.bombards) b.dispose();
+    this.bombards.length = 0;
+
+    for (const c of this.catapults) c.dispose();
+    this.catapults.length = 0;
 
     for (const q of this.quarries) q.dispose();
     this.quarries = [];
@@ -280,8 +307,9 @@ export class Game {
     this.effects.dispose();
 
     this.keep.health = this.keep.maxHealth;
-    this.keep.attackRadius = 5.2;
+    this.keep.attackRadius = FEEL.keep.attackRadius;
     this.keep.collapseT = 0;
+    this.keep._collapseBurstT = 0;
     this.keep.shake = 0;
     this.keep.healFlash = 0;
     this.keep.incomeTimer = KEEP.incomeInterval;
@@ -294,17 +322,18 @@ export class Game {
 
     this.player.reset();
     this.waves.stop();
-    this.purse = 0;
-    this.wood = 0;
+    this.purse = COINS.starting;
+    this.wood = WOOD.starting;
     this.stone = STONE.starting;
     // Drop the camera state so the follow pose snaps to the hero's spawn rather
     // than easing in from wherever the last run ended.
     this.camTarget = null;
     this.intro = null;
-    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, quarries: 0, walls: 0, repairs: 0 };
+    this.defeat = null;
+    this.stats = { kills: 0, waves: 0, coins: 0, wood: 0, stone: 0, towers: 0, bombards: 0, catapults: 0, quarries: 0, walls: 0, repairs: 0 };
     this.hud.reset();
-    this.hud.setCoins(0);
-    this.hud.setWood(0);
+    this.hud.setCoins(this.purse);
+    this.hud.setWood(this.wood);
     this.hud.setStone(this.stone);
     this.hud.setHero(1);
     this.hud.setKeep(1, this.keep.maxHealth, this.keep.maxHealth);
@@ -317,7 +346,12 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     // Pull back a little on narrow/portrait screens so the field stays readable.
-    this.camera.fov = CAMERA.fov * (w / h < 0.85 ? 1.28 : w / h < 1.2 ? 1.12 : 1);
+    const ratio = w / h;
+    let fovMul = 1;
+    for (const [threshold, mult] of CINE.fovPortrait) {
+      if (ratio < threshold) { fovMul = mult; break; }
+    }
+    this.camera.fov = CAMERA.fov * fovMul;
     this.camera.updateProjectionMatrix();
     this.viewport = { width: w, height: h };
   }
@@ -329,9 +363,9 @@ export class Game {
   _spawnEnemy(type, gateIndex, mods) {
     const gate = this.world.spawnGates[gateIndex % this.world.spawnGates.length];
     const pos = new THREE.Vector3(
-      gate.x + (Math.random() - 0.5) * 3,
+      gate.x + (Math.random() - 0.5) * SPAWN.jitter,
       0,
-      gate.z + (Math.random() - 0.5) * 3
+      gate.z + (Math.random() - 0.5) * SPAWN.jitter
     );
 
     const enemy = new Enemy(this.scene, type, {
@@ -343,14 +377,7 @@ export class Game {
     });
     this.enemies.push(enemy);
 
-    this.effects.burst(pos, {
-      count: 6,
-      color: 0xcbb894,
-      speed: 3,
-      size: 0.2,
-      life: 0.6,
-      gravity: 10,
-    });
+    this.effects.burst(pos, SPAWN.burst);
     return enemy;
   }
 
@@ -383,6 +410,8 @@ export class Game {
   _counts() {
     return {
       tower: this.towers.length,
+      bombard: this.bombards.length,
+      catapult: this.catapults.length,
       quarry: this.quarries.length,
       wall: this.walls.size,
     };
@@ -414,7 +443,13 @@ export class Game {
    * the enemy code does not care which is which.
    */
   get _buildings() {
-    return [...this.towers, ...this.quarries, ...this.walls.values()];
+    return [
+      ...this.towers,
+      ...this.bombards,
+      ...this.catapults,
+      ...this.quarries,
+      ...this.walls.values(),
+    ];
   }
 
   /* ------------------------------------------------------------------ *
@@ -795,7 +830,7 @@ export class Game {
     const tint = valid ? BUILD.validTint : BUILD.invalidTint;
     for (const m of this._ghostMaterials) {
       m.emissive.setHex(tint);
-      m.emissiveIntensity = 0.35 + Math.sin(performance.now() / 150) * 0.12;
+      m.emissiveIntensity = BUILD.ghostPulse.base + Math.sin(performance.now() / BUILD.ghostPulse.rate) * BUILD.ghostPulse.amp;
     }
     return valid;
   }
@@ -830,13 +865,13 @@ export class Game {
     for (const tree of this.trees) {
       if (!tree.blocks) continue;
       const d = Math.hypot(x - tree.x, z - tree.z);
-      if (d < def.blockRadius + tree.blockRadius + 0.3) return false;
+      if (d < def.blockRadius + tree.blockRadius + BUILD.treePad) return false;
     }
 
     // Scenery: rocks, houses, fences.
     for (const c of this.world.colliders) {
       const d = Math.hypot(x - c.x, z - c.z);
-      if (d < def.blockRadius + c.r + 0.3) return false;
+      if (d < def.blockRadius + c.r + BUILD.colliderPad) return false;
     }
 
     return true;
@@ -867,7 +902,7 @@ export class Game {
     this.hud.setCoins(this.purse);
     this.hud.setStone(this.stone);
 
-    const opts = { effects: this.effects, projectiles: this.projectiles, sfx: this.sfx };
+    const opts = { effects: this.effects, projectiles: this.projectiles, sfx: this.sfx, hud: this.hud };
     if (def.connects) {
       opts.cell = { i: pt.i, j: pt.j };
       opts.mask = this._wallMask(pt.i, pt.j);
@@ -877,6 +912,12 @@ export class Game {
     if (def.id === 'quarry') {
       this.quarries.push(structure);
       this.stats.quarries += 1;
+    } else if (def.id === 'bombard') {
+      this.bombards.push(structure);
+      this.stats.bombards += 1;
+    } else if (def.id === 'catapult') {
+      this.catapults.push(structure);
+      this.stats.catapults += 1;
     } else if (def.id === 'wall') {
       this.walls.set(this._wallKey(pt.i, pt.j), structure);
       this.stats.walls += 1;
@@ -888,22 +929,8 @@ export class Game {
     }
 
     this.sfx.build();
-    this.effects.burst(new THREE.Vector3(pt.x, 1.4, pt.z), {
-      count: 16,
-      color: 0xd8b071,
-      speed: 6,
-      size: 0.26,
-      life: 0.8,
-      gravity: 16,
-    });
-    this.effects.burst(new THREE.Vector3(pt.x, 1.8, pt.z), {
-      count: 8,
-      color: 0xffe27a,
-      speed: 5,
-      size: 0.18,
-      life: 0.7,
-      gravity: 12,
-    });
+    this.effects.burst(new THREE.Vector3(pt.x, 1.4, pt.z), FX.build[0]);
+    this.effects.burst(new THREE.Vector3(pt.x, 1.8, pt.z), FX.build[1]);
     this.hud.floater(
       new THREE.Vector3(pt.x, 2.4, pt.z),
       `${def.name.toUpperCase()} BUILT`,
@@ -927,36 +954,15 @@ export class Game {
     this.hud.setWood(this.wood);
 
     const anchor = tree.chipAnchor();
-    this.effects.burst(anchor, {
-      count: 8,
-      color: P.plank,
-      speed: 4.5,
-      size: 0.15,
-      life: 0.6,
-      gravity: 15,
-    });
-    this.effects.burst(anchor, {
-      count: 4,
-      color: 0xd8b071,
-      speed: 3,
-      size: 0.11,
-      life: 0.5,
-      gravity: 12,
-    });
+    this.effects.burst(anchor, FX.treeChip[0]);
+    this.effects.burst(anchor, FX.treeChip[1]);
 
     this.hud.floater(anchor, `+${gained} WOOD`, 'wood');
 
     if (tree.isChopped) {
       // Fell! Dust plume and a chunkier sound sell the weight of it.
       this.sfx.treeFall();
-      this.effects.burst(new THREE.Vector3(tree.x, 0.4, tree.z), {
-        count: 14,
-        color: 0x6f5a3a,
-        speed: 5,
-        size: 0.22,
-        life: 0.9,
-        gravity: 12,
-      });
+      this.effects.burst(new THREE.Vector3(tree.x, 0.4, tree.z), FX.treeFall);
       this.hud.floater(new THREE.Vector3(tree.x, 2.4, tree.z), 'TIMBER!', 'good');
     } else {
       this.sfx.chop();
@@ -973,19 +979,12 @@ export class Game {
     this.hud.setWood(this.wood);
     this.hud.setStone(this.stone);
     this.keep.repair(REPAIR.healAmount);
-    this.keep.healFlash = 0.6;
+    this.keep.healFlash = FEEL.keep.healGlow;
     this.stats.repairs += 1;
 
     // Mossy-green sparks rising out of the walls.
     const pos = new THREE.Vector3(0, 3.2, -3.2);
-    this.effects.burst(pos, {
-      count: 14,
-      color: 0x9dff8a,
-      speed: 4.5,
-      size: 0.2,
-      life: 0.9,
-      gravity: -3,
-    });
+    this.effects.burst(pos, FX.repair);
     this.sfx.repair();
     this.hud.floater(pos, `+${REPAIR.healAmount} KEEP`, 'heal');
     return true;
@@ -1003,16 +1002,14 @@ export class Game {
     this.stats.repairs += 1;
 
     const pos = new THREE.Vector3(tower.root.position.x, 2.6, tower.root.position.z);
-    this.effects.burst(pos, {
-      count: 12,
-      color: 0x9dff8a,
-      speed: 4,
-      size: 0.18,
-      life: 0.8,
-      gravity: -2,
-    });
+    this.effects.burst(pos, FX.repairTower);
     this.sfx.repair();
-    this.hud.floater(pos, `+${REPAIR.towerHealAmount} ${tower.kind === 'quarry' ? 'QUARRY' : 'TOWER'}`, 'heal');
+    const label =
+      tower.kind === 'quarry' ? 'QUARRY'
+      : tower.kind === 'bombard' ? 'BOMBARD'
+      : tower.kind === 'catapult' ? 'CATAPULT'
+      : 'TOWER';
+    this.hud.floater(pos, `+${REPAIR.towerHealAmount} ${label}`, 'heal');
     return true;
   }
 
@@ -1035,14 +1032,7 @@ export class Game {
     structure.upgrade();
     this.sfx.build();
     const base = structure.root.position;
-    this.effects.burst(new THREE.Vector3(base.x, 1.8, base.z), {
-      count: 18,
-      color: 0xffd166,
-      speed: 7,
-      size: 0.24,
-      life: 0.9,
-      gravity: 14,
-    });
+    this.effects.burst(new THREE.Vector3(base.x, 1.8, base.z), FX.upgrade);
     this.hud.floater(
       new THREE.Vector3(base.x, 2.6, base.z),
       `LV ${structure.level}`,
@@ -1057,7 +1047,7 @@ export class Game {
    * ------------------------------------------------------------------ */
 
   _collide(pos) {
-    const limit = WORLD.size - 3.5;
+    const limit = WORLD.size - WORLD.heroClampPad;
     pos.x = clamp(pos.x, -limit, limit);
     pos.z = clamp(pos.z, -limit, limit);
 
@@ -1076,7 +1066,7 @@ export class Game {
       let dx = pos.x - b.root.position.x;
       let dz = pos.z - b.root.position.z;
       let d = Math.hypot(dx, dz);
-      const r = b.blockRadius + 0.3;
+      const r = b.blockRadius + BUILD.heroBerth;
       if (d >= r) continue;
       if (d < 0.0001) {
         dx = 1;
@@ -1122,7 +1112,7 @@ export class Game {
 
     const loop = (now) => {
       this._frameHandle = requestAnimationFrame(loop);
-      const dt = Math.min((now - this._lastTime) / 1000, 0.05);
+      const dt = Math.min((now - this._lastTime) / 1000, CINE.dtClamp);
       this._lastTime = now;
       this.update(dt);
       this.renderer.render(this.scene, this.camera);
@@ -1134,18 +1124,21 @@ export class Game {
     if (this.state === 'playing') {
       this._updateGameplay(dt);
     } else if (this.state === 'over') {
-      this.keep.updateCollapse(dt);
       this.effects.update(dt);
-      this.keep.update(dt, {});
       this._updateTrees(dt);
-      this._updateCameraOrIntro(dt);
+      if (this.keep.isDestroyed) {
+        // The keep falling gets its own camera: sweep around the ruin the way
+        // the opening screen circles the castle while it comes down.
+        this.keep.updateCollapse(dt);
+        this._updateDefeat(dt);
+      } else {
+        this.keep.update(dt, {});
+        this._updateCameraOrIntro(dt);
+      }
       this._updateSun();
     } else {
       // Menu: slow orbit around the keep for a living backdrop.
-      this._menuTime = (this._menuTime ?? 0) + dt;
-      const t = this._menuTime * 0.12;
-      this.camera.position.set(Math.sin(t) * 26, 24, Math.cos(t) * 26);
-      this.camera.lookAt(0, 2.5, 0);
+      this._updateMenuOrbit(dt);
       this._updateTrees(dt);
       this.hud.update(dt, this.camera, this.viewport);
     }
@@ -1174,14 +1167,7 @@ export class Game {
     this.keep.update(dt, {
       onIncome: (amount, pos) => {
         this._addCoins(amount, pos, { silent: true });
-        this.effects.burst(pos, {
-          count: 6,
-          color: P.gold,
-          speed: 4,
-          size: 0.16,
-          life: 0.7,
-          gravity: 16,
-        });
+        this.effects.burst(pos, FX.keepIncome);
       },
     });
 
@@ -1193,7 +1179,10 @@ export class Game {
       towers: this._buildings,
       camera: this.camera,
       onAttackKeep: (enemy, damage) => {
-        this.keep.damage(damage, new THREE.Vector3(
+        // The keep is earthworks and masonry: enemies chip it, not shatter it,
+        // so a single rush can't level it before the hero can get back to it.
+        const dealt = Math.max(1, Math.round(damage * KEEP.damageTakenScale));
+        this.keep.damage(dealt, new THREE.Vector3(
           enemy.root.position.x,
           2.4,
           enemy.root.position.z
@@ -1202,7 +1191,10 @@ export class Game {
       onAttackTower: (enemy, damage, building) => {
         // Structures are hacked at rather than shattered, so they chip slowly.
         const scale =
-          building.kind === 'quarry' ? QUARRY.damageTakenScale : TOWER.damageTakenScale;
+          building.kind === 'quarry' ? QUARRY.damageTakenScale
+          : building.kind === 'bombard' ? BOMBARD.damageTakenScale
+          : building.kind === 'catapult' ? CATAPULT.damageTakenScale
+          : TOWER.damageTakenScale;
         const dealt = Math.max(1, Math.round(damage * scale));
         building.takeDamage(dealt);
         this.sfx.towerHit();
@@ -1216,13 +1208,15 @@ export class Game {
           'bad'
         );
         if (building.destroyed) {
-          const quarry = building.kind === 'quarry';
-          this.hud.callout(
-            quarry ? 'QUARRY DOWN' : 'TOWER DOWN',
-            quarry ? 'Your stone supply is cut' : 'Rebuild or defend',
-            1.6,
-            'warn'
-          );
+          const down =
+            building.kind === 'quarry'
+              ? ['QUARRY DOWN', 'Your stone supply is cut']
+              : building.kind === 'bombard'
+                ? ['BOMBARD DOWN', 'The shelling has stopped']
+                : building.kind === 'catapult'
+                  ? ['CATAPULT DOWN', 'Your boulder thrower is gone']
+                  : ['TOWER DOWN', 'Rebuild or defend'];
+          this.hud.callout(down[0], down[1], 1.6, 'warn');
         }
         void enemy;
       },
@@ -1253,6 +1247,8 @@ export class Game {
 
     // --- Structures ---
     for (const t of this.towers) t.update(dt, this.enemies);
+    for (const b of this.bombards) b.update(dt, this.enemies);
+    for (const c of this.catapults) c.update(dt, this.enemies);
     for (const w of this.walls.values()) w.update(dt);
 
     // Quarries tick their stone output every few seconds.
@@ -1261,21 +1257,14 @@ export class Game {
         onYield: (amount, pos) => {
           this._addStone(amount, pos);
           this.sfx.stone();
-          this.effects.burst(pos, {
-            count: 6,
-            color: P.stoneRes,
-            speed: 3.4,
-            size: 0.16,
-            life: 0.7,
-            gravity: 14,
-          });
+          this.effects.burst(pos, FX.quarryYield);
         },
       });
     }
 
     // Collapsed structures topple into rubble and are removed. The player can
     // simply build a fresh one anywhere, so no pad is freed.
-    for (const list of [this.towers, this.quarries]) {
+    for (const list of [this.towers, this.bombards, this.catapults, this.quarries]) {
       for (let i = list.length - 1; i >= 0; i--) {
         const b = list[i];
         if (!b.collapseFinished) continue;
@@ -1317,8 +1306,8 @@ export class Game {
         this.stats.coins += value;
         this.hud.setCoins(this.purse);
         this.sfx.coin(this._coinStreak);
-        this._coinStreak = Math.min(12, this._coinStreak + 1);
-        this._coinStreakTimer = 0.55;
+        this._coinStreak = Math.min(ECONOMY.coinStreak.max, this._coinStreak + 1);
+        this._coinStreakTimer = ECONOMY.coinStreak.window;
       },
     });
 
@@ -1348,8 +1337,8 @@ export class Game {
     this.hud.update(dt, this.camera, this.viewport);
 
     // --- Loss conditions ---
-    if (this.keep.isDestroyed) this._endGame('THE KEEP FELL', 'They broke through.');
-    else if (this.player.dead) this._endGame('THE HERO FELL', 'You were overrun.');
+    if (this.keep.isDestroyed) this._endGame('THE KEEP FELL', 'They broke through.', 'keep');
+    else if (this.player.dead) this._endGame('THE HERO FELL', 'You were overrun.', 'hero');
   }
 
   _onEnemyKilled(enemy) {
@@ -1367,22 +1356,16 @@ export class Game {
     // The reward: coins get thrown out of the body.
     this.coins.drop(center, enemy.bounty.count, enemy.bounty.value);
 
+    const K = FX.kill;
     this.effects.burst(center, {
-      count: enemy.type.id === 'brute' ? 16 : 10,
+      count: enemy.type.id === 'brute' ? K.count.brute : K.count.other,
       color: enemy.type.color,
-      speed: 5.5,
-      size: 0.24 * enemy.type.scale,
-      life: 0.75,
-      gravity: 18,
+      speed: K.speed,
+      size: K.size * enemy.type.scale,
+      life: K.life,
+      gravity: K.gravity,
     });
-    this.effects.burst(center, {
-      count: 6,
-      color: 0xffe27a,
-      speed: 4.5,
-      size: 0.16,
-      life: 0.6,
-      gravity: 14,
-    });
+    this.effects.burst(center, K.bonus);
 
     this.sfx.enemyDie();
     this.hud.floater(
@@ -1441,7 +1424,7 @@ export class Game {
    */
   _computeFollowPose(dt) {
     const p = this.player.root.position;
-    const limit = WORLD.size - 9;
+    const limit = WORLD.size - CINE.follow.edgePad;
     const tx = clamp(p.x, -limit, limit);
     const tz = clamp(p.z, -limit, limit);
 
@@ -1452,16 +1435,17 @@ export class Game {
     this.camTarget.z = damp(this.camTarget.z, tz, CAMERA.followLerp, dt);
 
     // Slight kickback when the hero takes a hit, plus keep rumble.
-    const shake = Math.max(this.player.hitFlash > 0 ? 0.3 : 0, this.keep.shake * 0.8);
+    const F = CINE.follow;
+    const shake = Math.max(this.player.hitFlash > 0 ? F.heroShake : 0, this.keep.shake * F.keepShake);
     const sx = (Math.random() - 0.5) * shake;
     const sz = (Math.random() - 0.5) * shake;
 
     this._followPose.pos.set(
       this.camTarget.x + CAMERA.offset.x + sx,
-      CAMERA.offset.y + Math.sin(performance.now() / 900) * 0.15,
+      CAMERA.offset.y + Math.sin(performance.now() / F.bobRate) * F.bob,
       this.camTarget.z + CAMERA.offset.z + sz
     );
-    this._followPose.look.set(this.camTarget.x, 1.6, this.camTarget.z);
+    this._followPose.look.set(this.camTarget.x, F.lookY, this.camTarget.z);
     return this._followPose;
   }
 
@@ -1497,23 +1481,23 @@ export class Game {
   _beginIntro() {
     this.intro = {
       t: 0,
-      duration: 10.0,
+      duration: CINE.intro.duration,
       /** Any input inside this window before the end skips the rest. */
-      skipWindow: 1.2,
+      skipWindow: CINE.intro.skipWindow,
       /** Input is ignored for this long at the start, so the START click itself
        *  cannot cancel the shot. */
-      skipGrace: 0.4,
+      skipGrace: CINE.intro.skipGrace,
       /** Camera comes to a dead stop on the bow for this long. The moving part
        *  of the take keeps its old 9s pace; this is added on top of it. */
-      holdDuration: 1.0,
+      holdDuration: CINE.intro.holdDuration,
       /** Index in INTRO_CAM_KEYS of the bow close-up we hold on. */
-      holdKey: 4,
+      holdKey: CINE.intro.holdKey,
 
       // Offset from the bow to the close-up camera, in the hero's own frame:
       // out in front, to his sword-arm side, slightly above hand height.
-      handForward: 2.8,
-      handRight: 2.4,
-      handUp: 0.9,
+      handForward: CINE.intro.handForward,
+      handRight: CINE.intro.handRight,
+      handUp: CINE.intro.handUp,
 
       pos: new THREE.Vector3(),
       look: new THREE.Vector3(),
@@ -1654,7 +1638,9 @@ export class Game {
 
   /** Keep the shadow frustum tight around the action. */
   _updateSun() {
-    const p = this.player.root.position;
+    // Watch whatever the camera is actually framed on: the hero in play, the
+    // fallen keep during the defeat sweep.
+    const p = this.keep.isDestroyed ? _KEEP_CENTRE : this.player.root.position;
     this.sun.position.set(
       p.x + this.sunOffset.x,
       this.sunOffset.y,
@@ -1664,7 +1650,7 @@ export class Game {
     this.sun.target.updateMatrixWorld();
   }
 
-  _endGame(title, subtitle) {
+  _endGame(title, subtitle, cause = 'hero') {
     if (this.state === 'over') return;
     this.state = 'over';
     this.intro = null;
@@ -1680,9 +1666,84 @@ export class Game {
     this.hud.el.goStats.innerHTML =
       `${subtitle}<br />` +
       `<b>${s.waves}</b> waves survived · <b>${s.kills}</b> kills · ` +
-      `<b>${s.towers}</b> towers · <b>${s.quarries}</b> quarries · <b>${s.walls}</b> walls · <b>${s.coins}</b> coins looted<br />` +
+      `<b>${s.towers}</b> towers · <b>${s.bombards}</b> bombards · <b>${s.catapults}</b> catapults · <b>${s.quarries}</b> quarries · <b>${s.walls}</b> walls · <b>${s.coins}</b> coins looted<br />` +
       `<b>${s.wood}</b> wood chopped · <b>${s.stone}</b> stone cut · <b>${s.repairs}</b> repairs`;
-    this.hud.showGameOver(true);
+
+    // When the keep is what fell, hold the summary back until the defeat sweep
+    // has shown the walls come down. Otherwise the hero's death keeps the old
+    // framing and the screen drops straight away.
+    if (cause === 'keep') this._beginDefeat();
+    else this.hud.showGameOver(true);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Defeat sweep
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Arms the defeat camera. When the keep comes down we cut away from the hero
+   * and circle the castle the way the opening screen does, holding on it while
+   * the walls give way — so a run ends framed like it began. The orbit picks up
+   * from the camera's current bearing around the keep, so the move reads as a
+   * continuation of where the player was already looking rather than a cut.
+   */
+  _beginDefeat() {
+    const cam = this.camera.position;
+    this.defeat = {
+      t: 0,
+      angle: Math.atan2(cam.x, cam.z),
+      radius: Math.max(14, Math.hypot(cam.x, cam.z)),
+      height: Math.max(16, cam.y),
+      /** Total travel before the orbit settles into the slow menu circle. */
+      duration: KEEP.collapseTime + CINE.defeat.durationPad,
+      /** Summary shown once, at the end of the sweep. */
+      shown: false,
+    };
+  }
+
+  /**
+   * Runs the defeat sweep. It never really ends — once the castle has fallen we
+   * keep circling the ruin like the menu backdrop — it just drops the summary
+   * in and hands the framing back when the move has settled.
+   */
+  _updateDefeat(dt) {
+    const d = this.defeat;
+    if (!d) {
+      // Shouldn't happen, but fall back to the idle orbit if it ever does.
+      this._updateMenuOrbit(dt);
+      return;
+    }
+
+    d.t += dt;
+    // Steady bearing travel around the keep; radius and height ease in toward
+    // the menu's framing so the two shots match.
+    const D = CINE.defeat;
+    d.angle += dt * D.bearing / d.duration;
+    d.radius = damp(d.radius, D.radius, D.damp, dt);
+    d.height = damp(d.height, D.height, D.damp, dt);
+
+    // The castle shudders into its plaza; kick the camera accordingly, fading
+    // out as the ruin settles.
+    const kick = Math.max(0, 1 - d.t / (KEEP.collapseTime + 0.8)) * D.kick;
+    this.camera.position.set(
+      Math.sin(d.angle) * d.radius + (Math.random() - 0.5) * kick,
+      d.height + (Math.random() - 0.5) * kick,
+      Math.cos(d.angle) * d.radius + (Math.random() - 0.5) * kick
+    );
+    this.camera.lookAt(D.look.x, D.look.y, D.look.z);
+
+    if (!d.shown && d.t >= d.duration) {
+      d.shown = true;
+      this.hud.showGameOver(true);
+    }
+  }
+
+  /** The menu's slow circle around the keep — reused as the settled end shot. */
+  _updateMenuOrbit(dt) {
+    this._menuTime = (this._menuTime ?? 0) + dt;
+    const t = this._menuTime * CINE.menu.orbitSpeed;
+    this.camera.position.set(Math.sin(t) * CINE.menu.radius, CINE.menu.height, Math.cos(t) * CINE.menu.radius);
+    this.camera.lookAt(CINE.menu.look.x, CINE.menu.look.y, CINE.menu.look.z);
   }
 
   dispose() {
@@ -1708,24 +1769,18 @@ export class Game {
  * are laid out roughly 13-21 units apart, which keeps the pace even.
  *
  * `from: 'hands'` and `from: 'follow'` are resolved live each frame.
+ *
+ * The points themselves live in `CINE.intro.camKeys` (config.js):
+ *   - A single sweep: the camera walks steadily around the hero (the angle only
+ *     ever decreases, z only ever increases) while dipping down to his hands and
+ *     rising again. Keeping the angle and z monotone is what removes the corners
+ *     — a spline turns its speed down at any control point where the path
+ *     doubles back on itself, and that reads as a second shot starting.
+ *   - The one non-monotone value is height: the camera has to come down to hand
+ *     level. The neighbours above and below stay wide so the curve keeps a
+ *     strong mostly-horizontal tangent there and sweeps past the bow at speed.
  */
-const INTRO_CAM_KEYS = [
-  // A single sweep: the camera walks steadily around the hero (the angle only
-  // ever decreases, z only ever increases) while dipping down to his hands and
-  // rising again. Keeping the angle and z monotone is what removes the corners —
-  // a spline turns its speed down at any control point where the path doubles
-  // back on itself, and that reads as a second shot starting.
-  { angle: 2.6, radius: 33.9, height: 38, lookY: 1.2 }, // wide, high, off to the side
-  { angle: 2.45, radius: 30, height: 31, lookY: 1.2 },
-  { angle: 1.9, radius: 22, height: 20, lookY: 1.1 },
-  { angle: 1.5, radius: 16, height: 12, lookY: 1.0 },
-  // The one non-monotone value is height: the camera has to come down to hand
-  // level. The neighbours above and below stay wide so the curve keeps a strong
-  // mostly-horizontal tangent here and sweeps past the bow at speed.
-  { from: 'hands' },
-  { angle: -0.5, radius: 14, height: 13, lookY: 1.3 },
-  { from: 'follow' },
-];
+const INTRO_CAM_KEYS = CINE.intro.camKeys;
 
 /** Cubic ease-in-out: slow start, quick middle, gentle stop. */
 function easeInOut(x) {
@@ -1780,7 +1835,7 @@ function catmullRom(out, pts, u01) {
 }
 
 /** Resolution of the intro's arc-length tables. */
-const ARC_SAMPLES = 220;
+const ARC_SAMPLES = CINE.intro.arcSamples;
 /** Scratch for building those tables. */
 const _arcTmp = new THREE.Vector3();
 

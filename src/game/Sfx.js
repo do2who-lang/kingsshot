@@ -127,6 +127,39 @@ export class Sfx {
     this.tone({ freq: 170, type: 'triangle', dur: 0.06, gain: 0.08, sweep: -55 });
   }
 
+  /** A bombard loosing a shell: a deep powder thump with a puff of escaping air. */
+  mortarLaunch() {
+    this.tone({ freq: 120, type: 'sawtooth', dur: 0.3, gain: 0.2, sweep: -70 });
+    this.tone({ freq: 62, type: 'square', dur: 0.34, gain: 0.16, sweep: -26 });
+    this.noise({ dur: 0.26, gain: 0.22, filter: 900, q: 0.7, delay: 0.02 });
+    this.noise({ dur: 0.2, gain: 0.12, filter: 2600, type: 'highpass', delay: 0.04 });
+  }
+
+  /** A shell bursting: a bright crack over a low, rattling boom. */
+  explosion() {
+    this.noise({ dur: 0.42, gain: 0.34, filter: 1500, q: 0.5 });
+    this.tone({ freq: 88, type: 'square', dur: 0.42, gain: 0.22, sweep: -44 });
+    this.noise({ dur: 0.6, gain: 0.24, filter: 360, delay: 0.06 });
+    this.tone({ freq: 52, type: 'triangle', dur: 0.5, gain: 0.18, sweep: -20, delay: 0.08 });
+  }
+
+  /** A catapult loosing: timber creaks, then the arm slams forward. */
+  catapultLaunch() {
+    // Torsion bundle releasing — a rising creak that snaps off.
+    this.tone({ freq: 150, type: 'sawtooth', dur: 0.22, gain: 0.14, sweep: 90 });
+    this.noise({ dur: 0.3, gain: 0.2, filter: 700, q: 0.8 });
+    // The arm thumping into its stop.
+    this.tone({ freq: 96, type: 'square', dur: 0.2, gain: 0.16, sweep: -40, delay: 0.06 });
+  }
+
+  /** A boulder smashing down: a heavy ground thud with a gritty crunch. */
+  boulderCrash() {
+    this.noise({ dur: 0.4, gain: 0.3, filter: 800, q: 0.6 });
+    this.tone({ freq: 74, type: 'square', dur: 0.4, gain: 0.2, sweep: -34 });
+    this.noise({ dur: 0.5, gain: 0.2, filter: 420, delay: 0.05 });
+    this.tone({ freq: 140, type: 'triangle', dur: 0.14, gain: 0.1, sweep: -70, delay: 0.04 });
+  }
+
   coin(streak = 0) {
     const base = 880 + Math.min(8, streak) * 70;
     this.tone({ freq: base, type: 'triangle', dur: 0.09, gain: 0.14 });

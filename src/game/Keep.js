@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { KEEP } from './config.js';
+import { FEEL, KEEP } from './config.js';
 import { createKeep } from './models.js';
 import { clamp, damp } from './utils.js';
 
@@ -20,7 +20,7 @@ export class Keep {
     this.health = this.maxHealth;
 
     /** Enemies stop and attack at this radius from the keep centre. */
-    this.attackRadius = 5.2;
+    this.attackRadius = FEEL.keep.attackRadius;
 
     this.flash = 0;
     this.shake = 0;
@@ -48,8 +48,8 @@ export class Keep {
   damage(amount, hitPosition) {
     if (this.isDestroyed) return;
     this.health = Math.max(0, this.health - amount);
-    this.flash = 0.22;
-    this.shake = Math.min(1, this.shake + amount / 40);
+    this.flash = FEEL.keep.flash;
+    this.shake = Math.min(1, this.shake + amount / FEEL.keep.shakeGain);
 
     if (this.sfx) this.sfx.keepHit();
     if (this.effects) {
@@ -70,6 +70,10 @@ export class Keep {
   }
 
   update(dt, { onIncome } = {}) {
+    // Once the walls start coming down the collapse owns the transform and the
+    // emissive glow — bail out so its shudder and lean aren't damped back.
+    if (this.collapseT > 0) return;
+
     if (this.flash > 0) this.flash -= dt;
     if (this.healFlash > 0) this.healFlash -= dt;
 
@@ -81,7 +85,7 @@ export class Keep {
         m.emissiveIntensity = 0.6;
       }
     } else if (this.healFlash > 0) {
-      const t = clamp(this.healFlash / 0.6, 0, 1);
+      const t = clamp(this.healFlash / FEEL.keep.healGlow, 0, 1);
       for (const m of this.materials) {
         m.emissive.setHex(0x6cff7a);
         m.emissiveIntensity = 0.5 * t;
@@ -94,10 +98,10 @@ export class Keep {
     }
 
     if (this.shake > 0) {
-      this.shake = Math.max(0, this.shake - dt * 3.5);
-      this.root.position.x = (Math.random() - 0.5) * this.shake * 0.28;
-      this.root.position.z = (Math.random() - 0.5) * this.shake * 0.28;
-      this.root.rotation.z = (Math.random() - 0.5) * this.shake * 0.035;
+      this.shake = Math.max(0, this.shake - dt * FEEL.keep.shakeDecay);
+      this.root.position.x = (Math.random() - 0.5) * this.shake * FEEL.keep.shakePos;
+      this.root.position.z = (Math.random() - 0.5) * this.shake * FEEL.keep.shakePos;
+      this.root.rotation.z = (Math.random() - 0.5) * this.shake * FEEL.keep.shakeRot;
     } else {
       this.root.position.x = damp(this.root.position.x, 0, 12, dt);
       this.root.position.z = damp(this.root.position.z, 0, 12, dt);
@@ -116,11 +120,78 @@ export class Keep {
 
   /** Collapse animation used on game over. */
   collapseT = 0;
+  _collapseBurstT = 0;
+
+  /**
+   * The keep coming down.
+   *
+   * A short, heavy sequence rather than a single linear fade: the walls shudder
+   * and shed rubble and dust on a steady cadence, the timber hall catches a
+   * fiery glow, then the whole castle leans and sinks into its own plaza. Tuned
+   * to finish around `KEEP.collapseTime` so the defeat camera has a beat to
+   * watch it happen.
+   */
   updateCollapse(dt) {
-    this.collapseT = Math.min(1, this.collapseT + dt * 0.9);
+    if (this.collapseT >= 1) return;
+
+    this.collapseT = Math.min(1, this.collapseT + dt / KEEP.collapseTime);
     const t = this.collapseT;
-    this.root.rotation.z = t * 0.22;
-    this.root.position.y = -t * 1.4;
-    this.root.scale.setScalar(1 - t * 0.05);
+
+    // Gravity, not a fade: the sink and the lean accelerate, while the shudder
+    // is worst as the walls first give way and dies away as it comes to rest.
+    const fall = t * t;
+    const shudder = (1 - t) * (1 - t);
+    const C = FEEL.keep.collapse;
+
+    this.root.position.set(
+      (Math.random() - 0.5) * shudder * C.posWobble,
+      -fall * C.sink,
+      (Math.random() - 0.5) * shudder * C.posWobble
+    );
+    this.root.rotation.set(
+      Math.sin(t * Math.PI * 7) * shudder * C.shudderYaw,
+      0,
+      fall * C.lean + Math.sin(t * Math.PI * 9) * shudder * C.shudderRoll
+    );
+    this.root.scale.setScalar(1 - t * C.scale);
+
+    // Everything glows like embers as the timber hall catches light.
+    const E = FEEL.keep.ember;
+    for (const m of this.materials) {
+      m.emissive.setHex(0xff5a22);
+      m.emissiveIntensity = E.base + t * E.span * (0.55 + Math.random() * E.jitter);
+    }
+
+    // Shed rubble — and the odd gout of flame — from around the walls.
+    const R = FEEL.keep.rubble;
+    this._collapseBurstT -= dt;
+    if (this.effects && this._collapseBurstT <= 0) {
+      this._collapseBurstT = R.interval + Math.random() * R.intervalJitter;
+      const a = Math.random() * Math.PI * 2;
+      const r = R.radius + Math.random() * R.radiusSpan;
+      const p = new THREE.Vector3(
+        Math.cos(a) * r,
+        R.yBase + Math.random() * R.ySpan,
+        Math.sin(a) * r
+      );
+      this.effects.burst(p, {
+        count: 6,
+        color: 0xbfae92,
+        speed: 6.5,
+        size: 0.3,
+        life: 1.0,
+        gravity: 17,
+      });
+      if (Math.random() < R.fireChance) {
+        this.effects.burst(p, {
+          count: 3,
+          color: 0xffb03a,
+          speed: 3.4,
+          size: 0.26,
+          life: 0.5,
+          gravity: 2,
+        });
+      }
+    }
   }
 }

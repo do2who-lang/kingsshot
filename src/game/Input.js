@@ -5,6 +5,8 @@
  * The camera never yaws, so screen axes map 1:1 onto world axes — no
  * camera-relative math needed.
  */
+import { INPUT } from './config.js';
+
 export class Input {
   constructor(canvas, dom = {}) {
     this.canvas = canvas;
@@ -28,7 +30,7 @@ export class Input {
     this.pointerId = null;
     this.origin = { x: 0, y: 0 };
     this.current = { x: 0, y: 0 };
-    this.maxRadius = 62;
+    this.maxRadius = INPUT.maxRadius;
 
     this.stickZone = dom.stickZone ?? document.getElementById('stick-zone');
     this.stickBase = dom.stickBase ?? document.getElementById('stick-base');
@@ -145,8 +147,8 @@ export class Input {
 
     // Update the knob visual.
     if (this.stickKnob) {
-      const knobX = Math.max(-1, Math.min(1, x)) * 34;
-      const knobY = Math.max(-1, Math.min(1, z)) * 34;
+      const knobX = Math.max(-1, Math.min(1, x)) * INPUT.knobTravel;
+      const knobY = Math.max(-1, Math.min(1, z)) * INPUT.knobTravel;
       this.stickKnob.style.transform = `translate(-50%, -50%) translate(${knobX}px, ${knobY}px)`;
     }
 

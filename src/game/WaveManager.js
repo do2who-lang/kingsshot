@@ -1,4 +1,4 @@
-import { ENEMY_TYPES, WAVES, generateWave } from './config.js';
+import { ENEMY_TYPES, SPAWN, WAVES, generateWave } from './config.js';
 
 /**
  * Drives the wave cycle:
@@ -83,7 +83,7 @@ export class WaveManager {
       // Bias toward the heaviest affordable unit roughly half the time, so
       // late waves feel mixed rather than spammy.
       let type;
-      if (Math.random() < 0.45) {
+      if (Math.random() < SPAWN.heavyBias) {
         type = affordable.reduce((a, b) => (b.threat > a.threat ? b : a));
       } else {
         type = affordable[Math.floor(Math.random() * affordable.length)];
@@ -105,10 +105,10 @@ export class WaveManager {
   _beginWave() {
     const cfg = this._configFor(this.waveNumber);
     this.queue = this._buildQueue(this.waveNumber);
-    this.spawnGap = cfg.spawnGap ?? 0.8;
+    this.spawnGap = cfg.spawnGap ?? SPAWN.defaultGap;
     this.spawned = 0;
     this.spawnedTotal = this.queue.length;
-    this.spawnTimer = 0.2;
+    this.spawnTimer = SPAWN.initialDelay;
     this.state = 'spawning';
     this.onWaveStart?.(this.waveNumber, this.spawnedTotal, cfg);
   }
@@ -173,7 +173,7 @@ export class WaveManager {
     let gate = Math.floor(Math.random() * (this.gateCount - 1));
     if (gate >= this._lastGate) gate += 1;
     // Occasionally double up on the same lane for a "focused push".
-    if (Math.random() < 0.18) gate = this._lastGate;
+    if (Math.random() < SPAWN.gateDoubleUp) gate = this._lastGate;
     this._lastGate = gate;
     return gate;
   }

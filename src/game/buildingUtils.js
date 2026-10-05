@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FEEL } from './config.js';
 
 /**
  * The small two-quad billboard every player structure floats above itself: a
@@ -33,5 +34,5 @@ export function buildHealthBar() {
 
 /** Green → amber → red as a structure is worn down. */
 export function healthBarColor(ratio) {
-  return ratio > 0.6 ? 0x8fe07a : ratio > 0.3 ? 0xf5c518 : 0xe8452f;
+  return ratio > FEEL.barGood ? 0x8fe07a : ratio > FEEL.barWarn ? 0xf5c518 : 0xe8452f;
 }

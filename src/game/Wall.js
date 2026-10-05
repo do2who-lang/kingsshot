@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WALL } from './config.js';
+import { FEEL, WALL } from './config.js';
 import { createWall } from './models.js';
 import { buildHealthBar, healthBarColor } from './buildingUtils.js';
 import { clamp } from './utils.js';
@@ -49,7 +49,7 @@ export class Wall {
     scene.add(this.root);
 
     this.blockRadius = WALL.blockRadius;
-    this.badgeHeight = WALL.height + 1.1;
+    this.badgeHeight = WALL.height + FEEL.wall.badgePad;
 
     this.maxHealth = WALL.maxHealth;
     this.health = this.maxHealth;
@@ -136,13 +136,13 @@ export class Wall {
 
   /** Sphere centre enemies use to find and hit this piece. */
   centerWorld(out = new THREE.Vector3()) {
-    return out.set(this.root.position.x, this.root.position.y + 0.9, this.root.position.z);
+    return out.set(this.root.position.x, this.root.position.y + FEEL.wall.centreY, this.root.position.z);
   }
 
   takeDamage(amount) {
     if (this.destroyed) return;
     this.health = Math.max(0, this.health - amount);
-    this.hitFlash = 0.16;
+    this.hitFlash = FEEL.hitFlash;
     if (this.health <= 0) this._collapse();
   }
 
@@ -216,10 +216,10 @@ export class Wall {
     const t = this.collapseT;
     const eased = t * t;
 
-    this.root.rotation.z = eased * (Math.PI / 2 - 0.2) * this._fallDir;
-    this.root.position.y = -eased * 0.5;
+    this.root.rotation.z = eased * FEEL.collapse.lean * this._fallDir;
+    this.root.position.y = -eased * FEEL.collapse.sink;
 
-    const fade = Math.max(0, t - 0.55) / 0.45;
+    const fade = Math.max(0, t - FEEL.collapse.fadeStart) / FEEL.collapse.fadeSpan;
     if (!this._faded) {
       for (const m of this.materials) m.transparent = true;
       this._faded = true;

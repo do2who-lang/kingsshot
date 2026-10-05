@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TOWER } from './config.js';
+import { FEEL, TOWER } from './config.js';
 import { createArcherTower } from './models.js';
 import { buildHealthBar } from './buildingUtils.js';
 import { clamp, damp } from './utils.js';
@@ -31,7 +31,7 @@ export class Tower {
     this.root.position.copy(position);
     scene.add(this.root);
 
-    this.cooldown = Math.random() * 0.4;
+    this.cooldown = Math.random() * FEEL.tower.initialCooldown;
     this.charge = 0;
     this.recoil = 0;
     this.target = null;
@@ -49,9 +49,9 @@ export class Tower {
      * The tower grows with the tier, so hard-coding this would aim the bolts
      * wrong the moment the player upgraded.
      */
-    this.turretHeight = built.parts.turretHeight ?? 2.0;
+    this.turretHeight = built.parts.turretHeight ?? FEEL.tower.turretHeight;
     /** Clear of the roof, for the floating health bar. */
-    this.badgeHeight = built.parts.badgeHeight ?? 3.0;
+    this.badgeHeight = built.parts.badgeHeight ?? FEEL.tower.badgeHeight;
 
     this.maxHealth = 1;
     this.health = 1;
@@ -123,13 +123,13 @@ export class Tower {
 
   /** Sphere centre enemies use to find and hit this tower. */
   centerWorld(out = this._center) {
-    return out.set(this.root.position.x, this.root.position.y + 2.0, this.root.position.z);
+    return out.set(this.root.position.x, this.root.position.y + FEEL.tower.centreY, this.root.position.z);
   }
 
   takeDamage(amount) {
     if (this.destroyed) return;
     this.health = Math.max(0, this.health - amount);
-    this.hitFlash = 0.16;
+    this.hitFlash = FEEL.hitFlash;
     if (this.health <= 0) this._collapse();
   }
 
@@ -267,7 +267,7 @@ export class Tower {
     // Re-acquire a few times a second rather than every frame.
     this.targetTimer -= dt;
     if (this.targetTimer <= 0 || !this.target || !this.target.alive) {
-      this.targetTimer = 0.18;
+      this.targetTimer = FEEL.tower.retarget;
       this._acquireTarget(enemies);
     }
 
@@ -285,7 +285,7 @@ export class Tower {
       const lead = t._lastVelocity ?? { x: 0, z: 0 };
       this._predicted.set(
         t.root.position.x + lead.x * travel,
-        t.root.position.y + t.headHeight * 0.75,
+        t.root.position.y + t.headHeight * FEEL.tower.leadHeight,
         t.root.position.z + lead.z * travel
       );
 
@@ -298,24 +298,24 @@ export class Tower {
       // The frame is authored along -Z, so a positive pitch tilts it upward.
       const desiredPitch = clamp(
         Math.atan2(this._predicted.y - muzzleY, Math.max(0.001, distXZ)),
-        -1.1,
-        0.5
+        FEEL.tower.pitchClamp[0],
+        FEEL.tower.pitchClamp[1]
       );
 
-      this.aimYaw = dampAngle(this.aimYaw, desiredYaw, 7, dt);
-      this.aimPitch = damp(this.aimPitch, desiredPitch, 7, dt);
+      this.aimYaw = dampAngle(this.aimYaw, desiredYaw, FEEL.tower.aimLerp, dt);
+      this.aimPitch = damp(this.aimPitch, desiredPitch, FEEL.tower.aimLerp, dt);
 
       // Loose only once roughly on target.
       const yawErr = Math.abs(shortestAngle(this.aimYaw, desiredYaw));
       this.cooldown -= dt;
-      if (this.cooldown <= 0 && yawErr < 0.22 && distXZ <= this.range) {
+      if (this.cooldown <= 0 && yawErr < FEEL.tower.fireTolerance && distXZ <= this.range) {
         this.cooldown = 1 / this.fireRate;
         firing = true;
       }
     } else {
       // Idle sweep, with the string relaxed.
-      this.aimYaw = dampAngle(this.aimYaw, this.aimYaw + dt * 0.3, 6, dt);
-      this.aimPitch = damp(this.aimPitch, -0.05, 4, dt);
+      this.aimYaw = dampAngle(this.aimYaw, this.aimYaw + dt * FEEL.tower.idleSweep, FEEL.tower.idleSweepLerp, dt);
+      this.aimPitch = damp(this.aimPitch, FEEL.tower.idlePitch, FEEL.tower.idlePitchLerp, dt);
       this.cooldown = Math.min(this.cooldown, 1 / this.fireRate);
     }
 
@@ -323,9 +323,9 @@ export class Tower {
     pitch.rotation.x = this.aimPitch;
 
     // Recoil kick, applied after aiming so it reads as a snap.
-    this.recoil = Math.max(0, this.recoil - dt * 6);
-    pitch.position.z += this.recoil * 0.22;
-    pitch.rotation.x += this.recoil * 0.1;
+    this.recoil = Math.max(0, this.recoil - dt * FEEL.tower.recoilDecay);
+    pitch.position.z += this.recoil * FEEL.tower.recoilZ;
+    pitch.rotation.x += this.recoil * FEEL.tower.recoilPitch;
 
     /*
      * The winch draws the string steadily over the reload. Because the draw is
@@ -344,7 +344,7 @@ export class Tower {
       this.healthBarFill.scale.x = Math.max(0.001, hp);
       this.healthBarFill.position.x = -(1 - hp) * 0.5;
       this.healthBarFill.material.color.setHex(
-        hp > 0.6 ? 0x8fe07a : hp > 0.3 ? 0xf5c518 : 0xe8452f
+        hp > FEEL.barGood ? 0x8fe07a : hp > FEEL.barWarn ? 0xf5c518 : 0xe8452f
       );
     }
   }
@@ -364,9 +364,9 @@ export class Tower {
     const draw = clamp(this.charge, 0, 1);
 
     // The bolt slides back along the groove as the string is winched in.
-    bolt.position.z = -0.62 + draw * 0.2;
+    bolt.position.z = FEEL.tower.draw.boltZ + draw * FEEL.tower.draw.boltSpan;
 
-    const dz = draw * 0.18;
+    const dz = draw * FEEL.tower.draw.stringDz;
     const len = Math.hypot(tips.x, dz);
 
     stringLeft.position.set(-tips.x, 0, tips.z);
@@ -387,9 +387,9 @@ export class Tower {
     const dir = this._dir.set(0, 0, -1).applyQuaternion(this._quat).normalize();
 
     // Slight scatter so sustained fire looks organic.
-    dir.x += (Math.random() - 0.5) * 0.022;
-    dir.y += (Math.random() - 0.5) * 0.022;
-    dir.z += (Math.random() - 0.5) * 0.022;
+    dir.x += (Math.random() - 0.5) * FEEL.tower.scatter;
+    dir.y += (Math.random() - 0.5) * FEEL.tower.scatter;
+    dir.z += (Math.random() - 0.5) * FEEL.tower.scatter;
     dir.normalize();
 
     this.projectiles.spawn({
@@ -397,21 +397,14 @@ export class Tower {
       direction: dir,
       speed: this.projectileSpeed,
       damage: this.damage,
-      range: this.range + 5,
+      range: this.range + FEEL.tower.rangePad,
       team: 'tower',
     });
 
     // Dust knocked loose from the arrow slit. There is no weapon up here — the
     // tower is masonry, and archers inside simply loose through the opening —
     // so this reads as grit shaken off the stones rather than a mechanism.
-    this.effects?.burst(this._muzzleWorld, {
-      count: 4,
-      color: 0xd8cbb0,
-      speed: 2.6,
-      size: 0.12,
-      life: 0.45,
-      gravity: 2,
-    });
+    this.effects?.burst(this._muzzleWorld, FEEL.tower.muzzle);
     this.sfx?.bowRelease(true);
     this.shotsFired += 1;
     this.recoil = 1;
@@ -422,11 +415,11 @@ export class Tower {
     const t = this.collapseT;
     const eased = t * t;
 
-    this.root.rotation.z = eased * (Math.PI / 2 - 0.15) * this._fallDir;
-    this.root.position.y = -eased * 0.55;
+    this.root.rotation.z = eased * FEEL.collapse.lean * this._fallDir;
+    this.root.position.y = -eased * FEEL.collapse.sink;
 
     // Fade out late, so the topple reads before it disappears.
-    const fade = Math.max(0, t - 0.55) / 0.45;
+    const fade = Math.max(0, t - FEEL.collapse.fadeStart) / FEEL.collapse.fadeSpan;
     if (!this._faded) {
       for (const m of this.materials) {
         m.transparent = true;

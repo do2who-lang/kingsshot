@@ -1,6 +1,8 @@
-import { QUARRY, TOWER, WALL } from './config.js';
-import { createArcherTower, createQuarry, createWall } from './models.js';
+import { BOMBARD, CATAPULT, QUARRY, TOWER, WALL } from './config.js';
+import { createArcherTower, createBombard, createCatapult, createQuarry, createWall } from './models.js';
 import { Tower } from './Tower.js';
+import { Bombard } from './Bombard.js';
+import { Catapult } from './Catapult.js';
 import { Quarry } from './Quarry.js';
 import { Wall } from './Wall.js';
 
@@ -39,20 +41,36 @@ export const BUILDING_TYPES = [
     preview: (level = 1) => createArcherTower(level).root,
   },
   {
-    id: 'quarry',
-    name: QUARRY.name,
-    blurb: 'Cuts stone for towers and repairs',
-    glyph: '\u26CF\uFE0F', // ⛏️
-    blockRadius: QUARRY.blockRadius,
-    maxLevel: QUARRY.maxLevel,
+    id: 'bombard',
+    name: BOMBARD.name,
+    blurb: 'Lobs exploding shells — clears packs',
+    glyph: '\u{1F4A3}', // 💣
+    blockRadius: BOMBARD.blockRadius,
+    maxLevel: BOMBARD.maxLevel,
     cost(count = 0) {
       return {
-        coins: QUARRY.buildCost + count * QUARRY.costStep,
-        stone: 0,
+        coins: BOMBARD.buildCost + count * BOMBARD.costStep,
+        stone: BOMBARD.stoneCost + count * BOMBARD.stoneStep,
       };
     },
-    create: (scene, position, opts) => new Quarry(scene, position, opts),
-    preview: (level = 1) => createQuarry(level).root,
+    create: (scene, position, opts) => new Bombard(scene, position, opts),
+    preview: (level = 1) => createBombard(level).root,
+  },
+  {
+    id: 'catapult',
+    name: CATAPULT.name,
+    blurb: 'Lobs a boulder that rolls on through',
+    glyph: '\u{1FAA8}', // 🪨
+    blockRadius: CATAPULT.blockRadius,
+    maxLevel: CATAPULT.maxLevel,
+    cost(count = 0) {
+      return {
+        coins: CATAPULT.buildCost + count * CATAPULT.costStep,
+        stone: CATAPULT.stoneCost + count * CATAPULT.stoneStep,
+      };
+    },
+    create: (scene, position, opts) => new Catapult(scene, position, opts),
+    preview: (level = 1) => createCatapult(level).root,
   },
   {
     id: 'wall',
@@ -70,6 +88,22 @@ export const BUILDING_TYPES = [
     create: (scene, position, opts) => new Wall(scene, position, opts),
     preview: (_level, mask) => createWall(mask ?? {}).root,
   },
+  {
+    id: 'quarry',
+    name: QUARRY.name,
+    blurb: 'Cuts stone for towers and repairs',
+    glyph: '\u26CF\uFE0F', // ⛏️
+    blockRadius: QUARRY.blockRadius,
+    maxLevel: QUARRY.maxLevel,
+    cost(count = 0) {
+      return {
+        coins: QUARRY.buildCost + count * QUARRY.costStep,
+        stone: 0,
+      };
+    },
+    create: (scene, position, opts) => new Quarry(scene, position, opts),
+    preview: (level = 1) => createQuarry(level).root,
+  }
 ];
 
 export const BUILDING_BY_ID = Object.fromEntries(BUILDING_TYPES.map((b) => [b.id, b]));

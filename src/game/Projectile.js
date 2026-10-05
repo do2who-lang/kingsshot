@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PROJECTILE } from './config.js';
 import { buildArrow } from './models.js';
 
 /**
@@ -19,7 +20,7 @@ export class ProjectileSystem {
     this.pool = [];
 
     /** Tower bolts are visibly heavier than the hero's arrows. */
-    this.teamScale = { hero: 0.92, tower: 1.3 };
+    this.teamScale = PROJECTILE.teamScale;
 
     this._a = new THREE.Vector3();
     this._b = new THREE.Vector3();
@@ -38,7 +39,7 @@ export class ProjectileSystem {
       return b;
     }
     return {
-      mesh: buildArrow({ length: 0.72 }),
+      mesh: buildArrow({ length: PROJECTILE.arrowLength }),
       vel: new THREE.Vector3(),
       prev: new THREE.Vector3(),
       travelled: 0,
@@ -120,21 +121,14 @@ export class ProjectileSystem {
 
       const hit = this._sweep(b, enemies);
       if (hit) {
-        this.effects.sparks(hit.point, b.team === 'tower' ? 6 : 4);
-        this.effects.burst(hit.point, {
-          count: 3,
-          color: 0xffcf5c,
-          speed: 5,
-          size: 0.1,
-          life: 0.25,
-          gravity: 12,
-        });
+        this.effects.sparks(hit.point, PROJECTILE.sparkCount[b.team] ?? PROJECTILE.sparkCount.hero);
+        this.effects.burst(hit.point, PROJECTILE.hitBurst);
         onHit?.(hit.enemy, b.damage, hit.point);
         this._release(i);
         continue;
       }
 
-      if (b.travelled >= b.maxRange || b.mesh.position.y < 0.05) {
+      if (b.travelled >= b.maxRange || b.mesh.position.y < PROJECTILE.groundCull) {
         this._release(i);
       }
     }

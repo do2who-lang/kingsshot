@@ -1,19 +1,14 @@
 import * as THREE from 'three';
-import { HERO, PALETTE as P } from './config.js';
+import { COIN, HERO, PALETTE as P } from './config.js';
 import { createCoin } from './models.js';
 import { randRange } from './utils.js';
-
-const GRAVITY = 26;
-const REST_LIFE = 16; // seconds before coins start blinking
-const MAX_LIFE = 24; // hard despawn
-const MAGNET_ACCEL = 34;
-const MAGNET_MAX_SPEED = 22;
 
 /**
  * Manages every loose coin on the ground.
  *
  * Coins are *thrown* out of a dying enemy (initial impulse + gravity + a bounce),
  * settle facing the camera, then fly to the hero once he walks close enough.
+ * All tuning lives in the `COIN` block of config.js.
  */
 export class CoinManager {
   constructor(scene) {
@@ -33,14 +28,14 @@ export class CoinManager {
     for (let i = 0; i < count; i++) {
       const mesh = createCoin();
       mesh.position.set(
-        origin.x + randRange(-0.25, 0.25),
-        origin.y + 0.4,
-        origin.z + randRange(-0.25, 0.25)
+        origin.x + randRange(-COIN.scatter, COIN.scatter),
+        origin.y + COIN.dropHeight,
+        origin.z + randRange(-COIN.scatter, COIN.scatter)
       );
 
       // Fan the coins outward in a ring so they scatter like real loot.
       const a = (i / count) * Math.PI * 2 + Math.random() * 0.8;
-      const power = randRange(2.6, 5.2);
+      const power = randRange(COIN.ringSpeed[0], COIN.ringSpeed[1]);
       this.scene.add(mesh);
 
       this.coins.push({
@@ -48,7 +43,7 @@ export class CoinManager {
         value,
         vel: new THREE.Vector3(
           Math.cos(a) * power,
-          randRange(5.5, 8.5),
+          randRange(COIN.tossSpeed[0], COIN.tossSpeed[1]),
           Math.sin(a) * power
         ),
         grounded: false,
@@ -78,17 +73,17 @@ export class CoinManager {
       if (!c.magnetized) {
         // --- Free physics: arc out, land, bounce, settle ---
         if (!c.grounded) {
-          c.vel.y -= GRAVITY * dt;
+          c.vel.y -= COIN.gravity * dt;
           m.position.addScaledVector(c.vel, dt);
-          m.rotation.x += dt * 9;
-          m.rotation.y += dt * 4;
+          m.rotation.x += dt * COIN.tumble[0];
+          m.rotation.y += dt * COIN.tumble[1];
 
-          if (m.position.y <= 0.14) {
-            m.position.y = 0.14;
-            if (Math.abs(c.vel.y) > 1.6) {
-              c.vel.y *= -0.42;
-              c.vel.x *= 0.55;
-              c.vel.z *= 0.55;
+          if (m.position.y <= COIN.restY) {
+            m.position.y = COIN.restY;
+            if (Math.abs(c.vel.y) > COIN.bounceVel) {
+              c.vel.y *= COIN.bounceDampY;
+              c.vel.x *= COIN.bounceDampXZ;
+              c.vel.z *= COIN.bounceDampXZ;
             } else {
               c.vel.set(0, 0, 0);
               c.grounded = true;
@@ -97,19 +92,21 @@ export class CoinManager {
           }
         } else {
           // Idle: gentle spin + bob so they read as collectible.
-          const bob = Math.sin(c.age * 3 + c.bobPhase) * 0.06;
-          m.position.y = 0.2 + bob;
-          m.rotation.z += dt * 2.2;
+          const bob = Math.sin(c.age * 3 + c.bobPhase) * COIN.bob;
+          m.position.y = COIN.bobBase + bob;
+          m.rotation.z += dt * COIN.spin;
         }
 
         // Blink out near end of life.
-        if (c.age > REST_LIFE) {
-          const t = (c.age - REST_LIFE) / (MAX_LIFE - REST_LIFE);
-          m.visible = Math.sin(c.age * 22) > -0.2;
-          if (t > 0.85) m.scale.setScalar(Math.max(0.02, 1 - (t - 0.85) / 0.15));
+        if (c.age > COIN.restLife) {
+          const t = (c.age - COIN.restLife) / (COIN.maxLife - COIN.restLife);
+          m.visible = Math.sin(c.age * COIN.blinkRate) > COIN.blinkThreshold;
+          if (t > COIN.fadeAt) {
+            m.scale.setScalar(Math.max(0.02, 1 - (t - COIN.fadeAt) / COIN.fadeSpan));
+          }
         }
 
-        if (c.age >= MAX_LIFE) {
+        if (c.age >= COIN.maxLife) {
           this.scene.remove(m);
           this.coins.splice(i, 1);
           continue;
@@ -129,16 +126,16 @@ export class CoinManager {
         if (shouldMagnet) {
           c.magnetized = true;
           c.grounded = true;
-          m.position.y += (1.0 - m.position.y) * Math.min(1, dt * 10);
+          m.position.y += (1.0 - m.position.y) * Math.min(1, dt * COIN.magnetLift);
 
           const dist = Math.sqrt(distSq) || 1;
-          c.speed = Math.min(MAGNET_MAX_SPEED, c.speed + MAGNET_ACCEL * dt);
+          c.speed = Math.min(COIN.magnetMaxSpeed, c.speed + COIN.magnetAccel * dt);
           m.position.x += (dx / dist) * c.speed * dt;
           m.position.z += (dz / dist) * c.speed * dt;
-          m.scale.setScalar(Math.max(0.35, 1 - c.age / MAX_LIFE));
-          m.rotation.z += dt * 16;
+          m.scale.setScalar(Math.max(COIN.shrinkMin, 1 - c.age / COIN.maxLife));
+          m.rotation.z += dt * COIN.magnetSpin;
 
-          if (dist < HERO.pickupRadius * 0.55 || m.position.y > 0.85) {
+          if (dist < HERO.pickupRadius * COIN.collectPad || m.position.y > COIN.collectHeight) {
             this.totalCollected += c.value;
             this.scene.remove(m);
             this.coins.splice(i, 1);
@@ -156,5 +153,12 @@ export class CoinManager {
   }
 }
 
-/** Exported for tests/tuning. */
-export const COIN_CONSTANTS = { GRAVITY, REST_LIFE, MAX_LIFE, MAGNET_ACCEL, MAGNET_MAX_SPEED, COLOR: P.gold };
+/** Exported for tests/tuning — mirrors the live `COIN` config. */
+export const COIN_CONSTANTS = {
+  GRAVITY: COIN.gravity,
+  REST_LIFE: COIN.restLife,
+  MAX_LIFE: COIN.maxLife,
+  MAGNET_ACCEL: COIN.magnetAccel,
+  MAGNET_MAX_SPEED: COIN.magnetMaxSpeed,
+  COLOR: P.gold,
+};
